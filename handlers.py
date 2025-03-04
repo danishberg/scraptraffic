@@ -1,3 +1,10 @@
+"""
+handlers.py
+Основная логика бота в едином потоке.
+Без аудио, с выбором (Все заявки / По фильтру),
+и "Сброс аккаунта (Logout)" в главном меню.
+"""
+
 import logging
 import json
 from telegram import (
