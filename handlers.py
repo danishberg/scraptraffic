@@ -1,433 +1,601 @@
-"""
-handlers.py
-Основная логика бота в едином потоке.
-Без аудио, с выбором (Все заявки / По фильтру),
-и "Сброс аккаунта (Logout)" в главном меню.
-"""
-
-import os
 import logging
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import (
-    ContextTypes,
-    ConversationHandler,
-    CommandHandler,
-    MessageHandler,
-    filters
+import json
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardRemove
 )
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+    ConversationHandler
+)
+
+# Import all DB-related functions from db.py
 from db import (
+    init_db,
     add_user,
     get_user_by_telegram_id,
-    update_user_role,
-    set_user_preferences,
-    get_user_preferences,
+    delete_user_by_telegram_id,
     add_request,
-    get_recent_requests,
-    delete_user_by_telegram_id
+    init_notification_items_for_user,
+    get_notification_items,
+    toggle_notification_item_by_id,
+    get_users_for_notification,
+    get_telegram_id_by_user_id,
+    get_all_requests
 )
 
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-# Ensure the images folder exists
-if not os.path.exists("images"):
-    os.makedirs("images")
+MAIN_MENU, REQUEST_INPUT = range(2)
 
-# Conversation states (enum-like)
-(
-    CHOOSE_ROLE,
-    ASK_BUYER_CITY_PREF,
-    ASK_BUYER_METAL_PREF,
-    MAIN_MENU,
-    SELL_CITY,
-    SELL_METAL,
-    SELL_QUANTITY,
-    SELL_DESCRIPTION,
-    SELL_IMAGE,
-    SELL_CONFIRM,
-    VIEW_MENU,
-    CHANGE_PREFS_CITY,
-    CHANGE_PREFS_METAL
-) = range(13)
-
-# -----------------------------
-# /start
-# -----------------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    /start: Check if user is in DB.
-    If not, ask for role. If yes, go to main menu.
-    """
-    user = update.effective_user
-    user_record = get_user_by_telegram_id(user.id)
-
-    if not user_record:
-        # User is new
-        add_user(user.id, user.username)
-        reply_keyboard = [["Покупатель", "Продавец", "Оба"]]
-        await update.message.reply_text(
-            "Добро пожаловать! Вы впервые здесь.\n"
-            "Кем вы хотите себя обозначить?\n"
-            "- Покупатель\n"
-            "- Продавец\n"
-            "- Оба\n",
-            reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
-        )
-        return CHOOSE_ROLE
-    else:
-        # Already in DB, go to main menu
-        return await go_to_main_menu(update, context)
-
-async def choose_role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Save chosen role (buyer/seller/both) from Russian text.
-    """
-    role_text = update.message.text.strip().lower()
-    user = update.effective_user
-    user_record = get_user_by_telegram_id(user.id)
-
-    role_map = {
-        "покупатель": "buyer",
-        "продавец": "seller",
-        "оба": "both"
-    }
-
-    if role_text not in role_map:
-        await update.message.reply_text("Пожалуйста, выберите: Покупатель, Продавец или Оба.")
-        return CHOOSE_ROLE
-
-    new_role = role_map[role_text]
-    if user_record:
-        update_user_role(user_record[0], new_role)
-
-    # If buyer or both, ask for city and metal preferences
-    if new_role in ["buyer", "both"]:
-        await update.message.reply_text("Введите города, в которых хотите видеть заявки (через запятую):")
-        return ASK_BUYER_CITY_PREF
-    else:
-        # Seller only -> go to main menu
-        return await go_to_main_menu(update, context)
-
-async def ask_buyer_city_pref(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['city_prefs'] = update.message.text
-    await update.message.reply_text("Введите типы металла, которые вас интересуют (через запятую):")
-    return ASK_BUYER_METAL_PREF
-
-async def ask_buyer_metal_pref(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['metal_prefs'] = update.message.text
-
-    user = update.effective_user
-    user_record = get_user_by_telegram_id(user.id)
-    if user_record:
-        # Save preferences to DB
-        set_user_preferences(user_record[0],
-                             context.user_data['city_prefs'],
-                             context.user_data['metal_prefs'])
-
-    await update.message.reply_text("Настройки сохранены!")
-    return await go_to_main_menu(update, context)
-
-# -----------------------------
-# Main menu
-# -----------------------------
-async def go_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Show main menu.
-    """
-    reply_keyboard = [
-        ["Подать заявку", "Просмотр заявок"],
-        ["Изменить настройки", "Оплата/Подписка"],
-        ["Сброс аккаунта (Logout)", "Выход из чата"]
+# ---------------------------------------------------------------------------
+# ПОМОГАЮЩИЕ ФУНКЦИИ
+# ---------------------------------------------------------------------------
+def build_main_menu():
+    keyboard = [
+        [InlineKeyboardButton("🚀 Активировать Pro‑аккаунт", callback_data="menu_pro")],
+        [InlineKeyboardButton("🔔 Настроить уведомления", callback_data="menu_notifications")],
+        [InlineKeyboardButton("📝 Разместить заявку", callback_data="menu_create_request")],
+        [InlineKeyboardButton("🚪 Выйти из аккаунта", callback_data="menu_logout")]
     ]
-    await update.message.reply_text(
-        "Главное меню: выберите действие.",
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+    return InlineKeyboardMarkup(keyboard)
+
+def build_request_summary(user_data):
+    req = user_data.get("request", {})
+    text = (
+        "<b>📋 Ваша заявка:</b>\n"
+        f"Тип: {req.get('type', 'не указан')}\n"
+        f"Материал: {req.get('material', 'не указан')}\n"
+        f"Количество: {req.get('quantity', 'не указано')}\n"
+        f"Город: {req.get('city', 'не указан')}\n"
+        f"Доп. информация: {req.get('info', 'не указана')}\n"
     )
+    return text
+
+def build_request_keyboard(user_data):
+    req = user_data.get("request", {})
+    type_btn = "Изменить тип заявки" if req.get("type", "не указан") != "не указан" else "Указать тип заявки"
+    mat_btn = "Изменить материал" if req.get("material", "не указан") != "не указан" else "Указать материал"
+    qty_btn = "Изменить количество" if req.get("quantity", "не указано") != "не указано" else "Указать количество"
+    city_btn = "Изменить город" if req.get("city", "не указан") != "не указан" else "Указать город"
+    info_btn = "Изменить доп. информацию" if req.get("info", "не указана") != "не указана" else "Указать доп. информацию"
+
+    keyboard = [
+        [InlineKeyboardButton(f"🔄 {type_btn}", callback_data="req_type")],
+        [InlineKeyboardButton(f"🔄 {mat_btn}", callback_data="req_material")],
+        [InlineKeyboardButton(f"🔄 {qty_btn}", callback_data="req_quantity")],
+        [InlineKeyboardButton(f"🔄 {city_btn}", callback_data="req_city")],
+        [InlineKeyboardButton(f"🔄 {info_btn}", callback_data="req_info")],
+        [InlineKeyboardButton("✅ Подтвердить заявку", callback_data="req_confirm")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="req_back_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def build_notifications_menu():
+    keyboard = [
+        [InlineKeyboardButton("Настроить материалы", callback_data="notif_materials")],
+        [InlineKeyboardButton("Настроить города", callback_data="notif_cities")],
+        [InlineKeyboardButton("🔍 Посмотреть все заявки", callback_data="notif_view_requests")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="notif_back_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def build_notification_list_keyboard(user_id, filter_type, page=1):
+    """
+    Показываем по 15 штук за раз. (id, value, is_enabled).
+    Instead of storing the entire JSON with Cyrillic in callback_data,
+    we store a short code: "tn|<filter_id>|<page>".
+    """
+    items = get_notification_items(user_id, filter_type)  # => [(id, value, is_enabled), ...]
+    items_per_page = 15
+    start = (page - 1) * items_per_page
+    end = start + items_per_page
+    subitems = items[start:end]
+
+    keyboard = []
+    for (filter_id, val, is_en) in subitems:
+        icon = "✅" if is_en == 1 else "❌"
+        # Short callback data: "tn|filter_id|page"
+        # 'tn' = toggle_notif
+        data = f"tn|{filter_id}|{page}"
+        button_text = f"{icon} {val}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=data)])
+
+    nav_btns = []
+    if page > 1:
+        nav_btns.append(InlineKeyboardButton("⬅️", callback_data=f"ln|{filter_type}|{page-1}"))
+    if end < len(items):
+        nav_btns.append(InlineKeyboardButton("➡️", callback_data=f"ln|{filter_type}|{page+1}"))
+    if nav_btns:
+        keyboard.append(nav_btns)
+
+    # Кнопка назад
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="notif_back")])
+
+    return InlineKeyboardMarkup(keyboard)
+
+# ---------------------------------------------------------------------------
+# УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЕЙ О НОВОЙ ЗАЯВКЕ
+# ---------------------------------------------------------------------------
+async def notify_users_about_new_request(context: ContextTypes.DEFAULT_TYPE, creator_user_id: int, req: dict):
+    material = req["material"]
+    city = req["city"]
+    matching_user_ids = get_users_for_notification(material, city)
+
+    notification_text = (
+        f"🔔 <b>Новая заявка</b>\n"
+        f"Тип: {req['type']}\n"
+        f"Материал: {material}\n"
+        f"Количество: {req['quantity']}\n"
+        f"Город: {city}\n"
+        f"Доп. инфо: {req['info']}\n"
+        "\n"
+        "Для просмотра откройте меню бота."
+    )
+
+    for uid in matching_user_ids:
+        if uid == creator_user_id:
+            continue
+        tg_id = get_telegram_id_by_user_id(uid)
+        if tg_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=tg_id,
+                    text=notification_text,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Failed to send notification to user_id={uid} (tg_id={tg_id}): {e}")
+
+# ---------------------------------------------------------------------------
+# ВЫВОД ВСЕХ ЗАЯВОК (ПРОСТАЯ ВЕРСИЯ)
+# ---------------------------------------------------------------------------
+def format_requests_list(requests):
+    """
+    requests => list of rows: (id, req_type, material, quantity, city, info, created_at)
+    Return a formatted string.
+    """
+    if not requests:
+        return "Заявок пока нет."
+
+    lines = []
+    for r in requests:
+        (req_id, req_type, material, qty, city, info, created_at) = r
+        line = (
+            f"#{req_id}: [{req_type}] {material}, {qty}, {city}\n"
+            f"   Доп: {info}\n"
+            f"   Дата: {created_at}\n"
+        )
+        lines.append(line)
+    return "\n".join(lines)
+
+# ---------------------------------------------------------------------------
+# /start
+# ---------------------------------------------------------------------------
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    add_user(user.id, user.username)
+    row = get_user_by_telegram_id(user.id)
+    if row:
+        user_id = row[0]
+        init_notification_items_for_user(user_id)
+
+    if update.message:
+        await update.message.reply_text("⏳ Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(
+            "📋 Главное меню: выберите действие.",
+            reply_markup=build_main_menu(),
+            parse_mode='HTML'
+        )
     return MAIN_MENU
 
-async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Handle clicks in main menu.
-    """
-    text = update.message.text.strip().lower()
-    user = update.effective_user
-    user_record = get_user_by_telegram_id(user.id)
-    role = user_record[3] if user_record else "buyer"
+# ---------------------------------------------------------------------------
+# ОБРАБОТКА INLINE-КНОПОК
+# ---------------------------------------------------------------------------
+async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    data = query.data
+    user = query.from_user
 
-    if text == "назад в меню":
-        # Already in the main menu
-        await update.message.reply_text("Вы уже находитесь в главном меню.")
+    user_row = get_user_by_telegram_id(user.id)
+    if not user_row:
+        await query.answer("Вы не зарегистрированы. Введите /start.", show_alert=True)
+        return ConversationHandler.END
+    user_id = user_row[0]
+
+    # Главное меню
+    if data == "menu_pro":
+        await query.message.edit_text(
+            "🚀 Функция активации Pro‑аккаунта пока не реализована.",
+            reply_markup=build_main_menu(),
+            parse_mode='HTML'
+        )
+        await query.answer()
         return MAIN_MENU
 
-    elif text == "подать заявку":
-        if role in ["seller", "both"]:
-            await update.message.reply_text("Введите ваш город:")
-            return SELL_CITY
-        else:
-            await update.message.reply_text("У вас роль покупателя, заявка недоступна.")
-            return MAIN_MENU
-
-    elif text == "просмотр заявок":
-        # Submenu: All or Filtered, or Back
-        sub_menu = [
-            ["Все заявки", "По фильтру"],
-            ["Назад в меню"]
-        ]
-        await update.message.reply_text(
-            "Хотите посмотреть все заявки или только по вашим фильтрам?",
-            reply_markup=ReplyKeyboardMarkup(sub_menu, one_time_keyboard=True)
+    elif data == "menu_notifications":
+        await query.message.edit_text(
+            "🔔 Вы можете отфильтровать получение заявок по материалам и городам.\n"
+            "По умолчанию уведомления приходят по всем материалам и городам.",
+            reply_markup=build_notifications_menu(),
+            parse_mode='HTML'
         )
-        return VIEW_MENU
-
-    elif text == "изменить настройки":
-        if role in ["buyer", "both"]:
-            await update.message.reply_text("Введите новые города (через запятую):")
-            return CHANGE_PREFS_CITY
-        else:
-            await update.message.reply_text("Вы зарегистрированы как продавец. Нет настроек.")
-            return MAIN_MENU
-
-    elif text == "оплата/подписка":
-        # Placeholder for future payment logic
-        await update.message.reply_text(
-            "Функция оплаты/подписки не реализована.\n"
-            "Здесь можно добавить платные возможности."
-        )
+        await query.answer()
         return MAIN_MENU
 
-    elif text == "сброс аккаунта (logout)":
+    elif data == "menu_create_request":
+        if "request" not in context.user_data:
+            context.user_data["request"] = {
+                "type": "не указан",
+                "material": "не указан",
+                "quantity": "не указано",
+                "city": "не указан",
+                "info": "не указана"
+            }
+        summary = build_request_summary(context.user_data)
+        kb = build_request_keyboard(context.user_data)
+        await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+        await query.answer()
+        return MAIN_MENU
+
+    elif data == "menu_logout":
         delete_user_by_telegram_id(user.id)
-        await update.message.reply_text(
-            "Ваш аккаунт удалён. Введите /start, чтобы зарегистрироваться заново."
+        await query.message.delete()
+        await query.answer()
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="🚪 Вы вышли из аккаунта. Введите /start, чтобы зарегистрироваться заново.",
+            parse_mode='HTML'
         )
         return ConversationHandler.END
 
-    elif text == "выход из чата":
-        await update.message.reply_text("Вы вышли из диалога. До свидания!")
-        return ConversationHandler.END
-
-    else:
-        await update.message.reply_text("Непонятная команда. Попробуйте ещё раз.")
+    # Меню уведомлений
+    elif data == "notif_back_main":
+        await query.message.delete()
+        await query.answer()
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="📋 Главное меню: выберите действие.",
+            reply_markup=build_main_menu(),
+            parse_mode='HTML'
+        )
         return MAIN_MENU
 
-# -----------------------------
-# Submenu "Просмотр заявок"
-# -----------------------------
-async def view_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    choice = update.message.text.strip().lower()
-
-    if choice == "все заявки":
-        return await view_all_requests(update, context)
-    elif choice == "по фильтру":
-        return await view_filtered_requests(update, context)
-    elif choice == "назад в меню":
-        return await go_to_main_menu(update, context)
-    else:
-        await update.message.reply_text("Непонятная команда. Попробуйте ещё раз.")
-        return VIEW_MENU
-
-async def view_all_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    rows = get_recent_requests(limit=10)
-    if not rows:
-        await update.message.reply_text("Пока нет заявок.")
-        # Stay in the VIEW_MENU so user can pick again
-        return VIEW_MENU
-
-    for row in rows:
-        req_id, user_id, city, metal_type, quantity, description, image_path, created_at = row
-        lines = [
-            f"ID заявки: {req_id}",
-            f"Город: {city}",
-            f"Металл: {metal_type}",
-            f"Количество: {quantity}",
-            f"Описание: {description}",
-            f"Дата: {created_at}"
-        ]
-        await update.message.reply_text("\n".join(lines))
-
-        # If there's an image, send it
-        if image_path and os.path.exists(image_path):
-            await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=open(image_path, 'rb'),
-                caption="Прикреплённое изображение."
-            )
-
-    # After listing all, stay in VIEW_MENU
-    return VIEW_MENU
-
-async def view_filtered_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.effective_user
-    user_record = get_user_by_telegram_id(user.id)
-    if not user_record:
-        await update.message.reply_text("Вы не зарегистрированы.")
-        return VIEW_MENU
-
-    rows = get_recent_requests(limit=10)
-    if not rows:
-        await update.message.reply_text("Пока нет заявок.")
-        return VIEW_MENU
-
-    city_prefs, metal_prefs = get_user_preferences(user_record[0])
-    city_list = [c.strip().lower() for c in city_prefs.split(',')] if city_prefs else []
-    metal_list = [m.strip().lower() for m in metal_prefs.split(',')] if metal_prefs else []
-
-    matched_any = False
-    for row in rows:
-        req_id, u_id, city, metal_type, quantity, description, image_path, created_at = row
-
-        # Filter by city
-        if city_list and city.lower() not in city_list:
-            continue
-        # Filter by metal
-        if metal_list and metal_type.lower() not in metal_list:
-            continue
-
-        matched_any = True
-        lines = [
-            f"ID заявки: {req_id}",
-            f"Город: {city}",
-            f"Металл: {metal_type}",
-            f"Количество: {quantity}",
-            f"Описание: {description}",
-            f"Дата: {created_at}"
-        ]
-        await update.message.reply_text("\n".join(lines))
-
-        if image_path and os.path.exists(image_path):
-            await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=open(image_path, 'rb'),
-                caption="Прикреплённое изображение."
-            )
-
-    if not matched_any:
-        await update.message.reply_text("Нет заявок, соответствующих вашим фильтрам.")
-
-    # Stay in VIEW_MENU
-    return VIEW_MENU
-
-# -----------------------------
-# Changing preferences
-# -----------------------------
-async def change_prefs_city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['city_prefs'] = update.message.text
-    await update.message.reply_text("Введите новые типы металла (через запятую):")
-    return CHANGE_PREFS_METAL
-
-async def change_prefs_metal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.effective_user
-    user_record = get_user_by_telegram_id(user.id)
-    context.user_data['metal_prefs'] = update.message.text
-
-    if user_record:
-        set_user_preferences(
-            user_record[0],
-            context.user_data['city_prefs'],
-            context.user_data['metal_prefs']
+    elif data == "notif_materials":
+        items_kb = build_notification_list_keyboard(user_id, "material", page=1)
+        await query.message.edit_text(
+            "🔔 Настройка материалов:",
+            reply_markup=items_kb,
+            parse_mode='HTML'
         )
+        await query.answer()
+        return MAIN_MENU
 
-    await update.message.reply_text("Настройки обновлены.")
+    elif data == "notif_cities":
+        items_kb = build_notification_list_keyboard(user_id, "city", page=1)
+        await query.message.edit_text(
+            "🔔 Настройка городов:",
+            reply_markup=items_kb,
+            parse_mode='HTML'
+        )
+        await query.answer()
+        return MAIN_MENU
+
+    elif data == "notif_view_requests":
+        # Показать все заявки (простая версия)
+        all_reqs = get_all_requests()
+        text = "<b>Все заявки:</b>\n\n" + format_requests_list(all_reqs)
+        # Возможно, в реальном коде делать пагинацию, но тут всё одним сообщением
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Назад", callback_data="notif_back")]
+        ])
+        await query.message.edit_text(text, parse_mode='HTML', reply_markup=kb)
+        await query.answer()
+        return MAIN_MENU
+
+    elif data == "notif_back":
+        # Вернуться к меню уведомлений
+        await query.message.edit_text(
+            "🔔 Вы можете отфильтровать получение заявок по материалам и городам.\n"
+            "По умолчанию уведомления приходят по всем материалам и городам.",
+            reply_markup=build_notifications_menu(),
+            parse_mode='HTML'
+        )
+        await query.answer()
+        return MAIN_MENU
+
+    # ----------------------------------------------
+    # Редактирование заявки (req_...)
+    # ----------------------------------------------
+    elif data.startswith("req_"):
+        if data == "req_set_type_selling":
+            context.user_data["request"]["type"] = "продажа"
+            summary = build_request_summary(context.user_data)
+            kb = build_request_keyboard(context.user_data)
+            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            await query.answer()
+            return MAIN_MENU
+
+        elif data == "req_set_type_buying":
+            context.user_data["request"]["type"] = "закупка"
+            summary = build_request_summary(context.user_data)
+            kb = build_request_keyboard(context.user_data)
+            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            await query.answer()
+            return MAIN_MENU
+
+        elif data == "req_really_confirm":
+            req = context.user_data["request"]
+            add_request(
+                user_id=user_id,
+                req_type=req["type"],
+                material=req["material"],
+                quantity=req["quantity"],
+                city=req["city"],
+                info=req["info"]
+            )
+            await notify_users_about_new_request(context, user_id, req)
+
+            context.user_data["request"] = {
+                "type": "не указан",
+                "material": "не указан",
+                "quantity": "не указано",
+                "city": "не указан",
+                "info": "не указана"
+            }
+            await query.message.edit_text("✅ Заявка успешно создана!", parse_mode='HTML')
+            await query.answer()
+            await query.message.reply_text(
+                "📋 Главное меню: выберите действие.",
+                reply_markup=build_main_menu(),
+                parse_mode='HTML'
+            )
+            return MAIN_MENU
+
+        sub = data.split("_")[1]
+        if sub == "back":
+            await query.message.delete()
+            await query.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="📋 Главное меню: выберите действие.",
+                reply_markup=build_main_menu(),
+                parse_mode='HTML'
+            )
+            await query.answer()
+            return MAIN_MENU
+
+        elif sub == "type":
+            kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("💰 Я продаю", callback_data="req_set_type_selling"),
+                    InlineKeyboardButton("🛒 Я покупаю", callback_data="req_set_type_buying")
+                ],
+                [InlineKeyboardButton("🔙 Отмена", callback_data="req_cancel_field")]
+            ])
+            await query.message.edit_text("Выберите тип заявки:", reply_markup=kb, parse_mode='HTML')
+            await query.answer()
+            return MAIN_MENU
+
+        elif sub in ["material", "quantity", "city", "info"]:
+            context.user_data["awaiting_field"] = sub
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data="req_cancel_field")]])
+            await query.message.edit_text(
+                f"Введите значение для <b>{sub}</b>:\nОтправьте текст сообщением в чат.",
+                reply_markup=kb,
+                parse_mode='HTML'
+            )
+            await query.answer()
+            return REQUEST_INPUT
+
+        elif sub == "confirm":
+            req = context.user_data["request"]
+            if (req.get("type") == "не указан" or
+                req.get("material") == "не указан" or
+                req.get("quantity") == "не указано" or
+                req.get("city") == "не указан"):
+                await query.answer("⚠️ Заполните обязательные поля (тип, материал, количество, город).", show_alert=True)
+                return MAIN_MENU
+            else:
+                summary = build_request_summary(context.user_data)
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Разместить заявку", callback_data="req_really_confirm")],
+                    [InlineKeyboardButton("🔄 Вернуться к редактированию", callback_data="req_no_confirm")]
+                ])
+                await query.message.edit_text(
+                    f"{summary}\nПодтверждаете размещение заявки?",
+                    reply_markup=kb,
+                    parse_mode='HTML'
+                )
+                await query.answer()
+                return MAIN_MENU
+
+        else:
+            await query.answer("Непонятная команда req_.", show_alert=True)
+            return MAIN_MENU
+
+    elif data in ["req_cancel_field", "req_no_confirm"]:
+        summary = build_request_summary(context.user_data)
+        kb = build_request_keyboard(context.user_data)
+        await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+        await query.answer()
+        return MAIN_MENU
+
+    # ----------------------------------------------
+    # Обработка короткого callback_data для фильтров
+    # ----------------------------------------------
+    elif data.startswith("tn|"):
+        # "tn|<filter_id>|<page>"
+        parts = data.split("|")
+        if len(parts) == 3:
+            _, filter_id_str, page_str = parts
+            filter_id = int(filter_id_str)
+            page = int(page_str)
+
+            # Toggle
+            toggle_notification_item_by_id(user_id, filter_id)
+            # Rebuild keyboard
+            # But we need to know if it's "material" or "city".
+            # We'll do a small trick: we can look it up again from DB.
+            # Because we need the filter_type to rebuild properly.
+            # Or we can store it in the callback. Let's do the second approach:
+            # We'll handle that below. For now let's do a quick solution:
+            # We'll do "ln|material|1" approach to re-page. So let's skip it:
+            # We don't know if it's material or city from just the ID. We'll do the same approach as "ln|".
+            # We'll do a separate table lookup approach. Let's do that:
+
+            # We can do a separate function to get filter_type from filter_id
+            filter_type = get_filter_type_for_id(user_id, filter_id=filter_id)
+            if filter_type:
+                new_kb = build_notification_list_keyboard(user_id, filter_type, page)
+                try:
+                    await query.message.edit_reply_markup(new_kb)
+                except Exception as e:
+                    logger.error(f"edit_reply_markup error: {e}")
+                await query.answer()
+                return MAIN_MENU
+            else:
+                await query.answer("Фильтр не найден.", show_alert=True)
+                return MAIN_MENU
+        else:
+            await query.answer("Непонятный формат callback_data (tn|).", show_alert=True)
+            return MAIN_MENU
+
+    elif data.startswith("ln|"):
+        # "ln|<filter_type>|<page>"
+        parts = data.split("|")
+        if len(parts) == 3:
+            _, filter_type, page_str = parts
+            page = int(page_str)
+            new_kb = build_notification_list_keyboard(user_id, filter_type, page)
+            try:
+                await query.message.edit_reply_markup(new_kb)
+            except Exception as e:
+                logger.error(f"edit_reply_markup error: {e}")
+            await query.answer()
+            return MAIN_MENU
+        else:
+            await query.answer("Непонятный формат callback_data (ln|).", show_alert=True)
+            return MAIN_MENU
+
+    else:
+        await query.answer("Непонятная команда.", show_alert=True)
+        return MAIN_MENU
+
+# ---------------------------------------------------------------------------
+# ДОП. ФУНКЦИЯ: ПОЛУЧИТЬ filter_type ПО filter_id
+# ---------------------------------------------------------------------------
+def get_filter_type_for_id(user_id: int, filter_id: int) -> str:
+    """
+    Возвращает 'material' или 'city' для заданного filter_id (принадлежащего user_id).
+    """
+    from db import get_connection
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT filter_type
+        FROM notification_filters
+        WHERE id = ? AND user_id = ?
+    ''', (filter_id, user_id))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return row[0]
+    return None
+
+# ---------------------------------------------------------------------------
+# ФОЛЛБЕК ДЛЯ ТЕКСТОВЫХ СООБЩЕНИЙ
+# ---------------------------------------------------------------------------
+async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip().lower()
+    if text == "test notifications":
+        await update.message.reply_text(
+            "🔔 Пример уведомления:\n"
+            "Новая заявка: Город Алматы, Материал Медь, Количество 5 тонн.\n"
+            "Нажмите /view_123 для просмотра.",
+            parse_mode='HTML'
+        )
+        return MAIN_MENU
+    else:
+        await update.message.reply_text("⚠️ Непонятная команда. Попробуйте ещё раз.", parse_mode='HTML')
+        return MAIN_MENU
+
+# ---------------------------------------------------------------------------
+# ОБРАБОТКА ВВОДА ТЕКСТА ДЛЯ ЗАЯВКИ
+# ---------------------------------------------------------------------------
+async def request_field_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    field = context.user_data.get("awaiting_field")
+    if not field:
+        await update.message.reply_text("⚠️ Нет поля для ввода. Попробуйте ещё раз.", parse_mode='HTML')
+        return MAIN_MENU
+
+    req = context.user_data.setdefault("request", {})
+    if field == "material":
+        req["material"] = text
+    elif field == "quantity":
+        req["quantity"] = text
+    elif field == "city":
+        req["city"] = text
+    elif field == "info":
+        req["info"] = text
+
+    context.user_data["awaiting_field"] = None
+
+    summary = build_request_summary(context.user_data)
+    kb = build_request_keyboard(context.user_data)
+    await update.message.reply_text(summary, reply_markup=kb, parse_mode='HTML')
     return MAIN_MENU
 
-# -----------------------------
-# Sell flow (Подача заявки)
-# -----------------------------
-async def sell_city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['city'] = update.message.text
-    await update.message.reply_text("Введите тип металла (например, алюминий, медь, нержавейка):")
-    return SELL_METAL
-
-async def sell_metal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['metal'] = update.message.text
-    await update.message.reply_text("Введите количество (например, 8 тонн):")
-    return SELL_QUANTITY
-
-async def sell_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['quantity'] = update.message.text
-    await update.message.reply_text("Опишите заявку (качество, условия и т.д.):")
-    return SELL_DESCRIPTION
-
-async def sell_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['description'] = update.message.text
-    await update.message.reply_text(
-        "Отправьте изображение для заявки (или напишите 'Пропустить'):"
-    )
-    return SELL_IMAGE
-
-async def sell_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    User sent a photo. Save it to images/<file_id>.jpg
-    """
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
-    image_path = os.path.join("images", f"{photo.file_id}.jpg")
-    await file.download_to_drive(custom_path=image_path)
-
-    context.user_data['image_path'] = image_path
-    await update.message.reply_text("Изображение получено. Подтвердить заявку? (Да/Нет)")
-    return SELL_CONFIRM
-
-async def skip_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    User typed 'Пропустить' instead of sending a photo.
-    """
-    context.user_data['image_path'] = ''
-    await update.message.reply_text("Изображение пропущено. Подтвердить заявку? (Да/Нет)")
-    return SELL_CONFIRM
-
-async def sell_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip().lower()
-    user = update.effective_user
-    user_record = get_user_by_telegram_id(user.id)
-
-    if text == "да" and user_record:
-        add_request(
-            user_id=user_record[0],
-            city=context.user_data.get('city', ''),
-            metal_type=context.user_data.get('metal', ''),
-            quantity=context.user_data.get('quantity', ''),
-            description=context.user_data.get('description', ''),
-            image_path=context.user_data.get('image_path', '')
-        )
-        await update.message.reply_text("Заявка успешно создана!")
-    else:
-        await update.message.reply_text("Заявка отменена.")
-
-    return await go_to_main_menu(update, context)
-
-# -----------------------------
-# Error handler
-# -----------------------------
+# ---------------------------------------------------------------------------
+# ОБРАБОТЧИК ОШИБОК
+# ---------------------------------------------------------------------------
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error('Update "%s" caused error "%s"', update, context.error)
 
-# -----------------------------
+# ---------------------------------------------------------------------------
 # ConversationHandler
-# -----------------------------
+# ---------------------------------------------------------------------------
 main_flow_handler = ConversationHandler(
-    entry_points=[CommandHandler('start', start)],
+    entry_points=[CommandHandler('start', cmd_start)],
     states={
-        CHOOSE_ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_role)],
-        ASK_BUYER_CITY_PREF: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_buyer_city_pref)],
-        ASK_BUYER_METAL_PREF: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_buyer_metal_pref)],
-
-        MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
-
-        VIEW_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, view_menu_handler)],
-
-        CHANGE_PREFS_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_prefs_city)],
-        CHANGE_PREFS_METAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_prefs_metal)],
-
-        SELL_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_city)],
-        SELL_METAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_metal)],
-        SELL_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_quantity)],
-        SELL_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_description)],
-        SELL_IMAGE: [
-            MessageHandler(filters.PHOTO, sell_image),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, skip_image)
+        MAIN_MENU: [
+            CallbackQueryHandler(main_menu_callback),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, text_fallback_handler),
         ],
-        SELL_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_confirm)],
+        REQUEST_INPUT: [
+            CallbackQueryHandler(main_menu_callback),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, request_field_input),
+        ],
     },
-    fallbacks=[CommandHandler('cancel', start)],
+    fallbacks=[CommandHandler('cancel', cmd_start)],
     name="main_flow"
 )
+
+# ---------------------------------------------------------------------------
+# Запуск бота (точка входа)
+# ---------------------------------------------------------------------------
+from telegram.ext import Application
+
+async def run_bot():
+    init_db()
+    app = Application.builder().token("YOUR_BOT_TOKEN_HERE").build()
+
+    app.add_handler(main_flow_handler)
+    app.add_error_handler(error_handler)
+
+    await app.run_polling()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(run_bot())

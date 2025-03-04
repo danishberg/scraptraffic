@@ -8,7 +8,7 @@ import asyncio
 import nest_asyncio
 
 from telegram.ext import ApplicationBuilder
-from config import TELEGRAM_BOT_TOKEN
+from config import TELEGRAM_BOT_TOKEN  # Предполагается, что config.py существует
 from db import init_db
 from handlers import main_flow_handler, error_handler
 
