@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Voice Order Wizard (DeepSeek R1)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0; padding: 0;
+      background: #f8f8f8;
+    }
+    header {
+      background: #333; color: white;
+      padding: 1rem; text-align: center;
+    }
+    main {
+      max-width: 600px; margin: 2rem auto;
+      background: white; padding: 2rem;
+      border-radius: 4px; box-shadow: 0 0 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin-top: 0; text-align: center;
+    }
+    #startBtn {
+      display: block; margin: 1rem auto; padding: 0.75rem 1.5rem;
+      font-size: 1.1rem; cursor: pointer; border: none; border-radius: 4px;
+      background: #007bff; color: white;
+    }
+    #log {
+      white-space: pre-wrap; margin-top: 1.5rem; background: #f0f0f0;
+      padding: 1rem; border-radius: 4px; max-height: 300px; overflow-y: auto;
+    }
+    footer {
+      text-align: center; margin: 2rem 0 1rem; color: #888;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Scrap Trading Bot – Voice Order Wizard (DeepSeek Powered)</h2>
+  </header>
+  <main>
+    <h1>Разместить Заявку Голосом</h1>
+    <p>
+      Нажмите кнопку ниже, и следуйте голосовым подсказкам. <br/>
+      DeepSeek R1 (7B) будет помогать с пониманием ваших ответов.
+    </p>
+    <button id="startBtn">Начать голосовую сессию</button>
+    <div id="log"></div>
+  </main>
+  <footer>
+    &copy; 2025 Scrap Trading Bot
+  </footer>
+
+  <script>
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Ваш браузер не поддерживает Web Speech API. Попробуйте Google Chrome или Microsoft Edge.");
+    }
+
+    let step = 0;
+    let orderData = {
+      type: "",
+      material: "",
+      quantity: "",
+      city: "",
+      info: ""
+    };
+
+    function log(msg) {
+      const logDiv = document.getElementById("log");
+      logDiv.textContent += msg + "\n";
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function speak(text, callback) {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = "ru-RU";
+      utter.rate = 1.0;
+      utter.onend = callback || function() {};
+      speechSynthesis.speak(utter);
+    }
+
+    function listen(callback) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "ru-RU";
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript.toLowerCase();
+        callback(transcript);
+      };
+      recognition.onerror = (err) => {
+        log("Ошибка распознавания: " + err.error);
+        callback("");
+      };
+      recognition.start();
+    }
+
+    // Call DeepSeek R1 locally to interpret or generate text
+    async function callDeepSeek(userText) {
+      log("→ Отправляем в DeepSeek: " + userText);
+      const res = await fetch("/ask_deepseek", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_input: userText })
+      });
+      const data = await res.json();
+      if (data.ai_reply) {
+        const reply = data.ai_reply.trim();
+        log("← Ответ DeepSeek: " + reply);
+        return reply;
+      } else {
+        log("Ошибка от DeepSeek: " + JSON.stringify(data));
+        return "";
+      }
+    }
+
+    // The wizard logic
+    async function nextStep() {
+      if (step === 0) {
+        // Let DeepSeek generate the initial prompt:
+        const aiPrompt = await callDeepSeek("Сформулируй приветствие и спроси, продает пользователь или покупает?");
+        speak(aiPrompt || "Здравствуйте! Скажите, я продаю или я покупаю?", () => {
+          listen(async (transcript) => {
+            log("Вы сказали: " + transcript);
+
+            // Let DeepSeek interpret
+            const interpret = await callDeepSeek("Пользователь сказал: " + transcript + ". Определи, это 'продажа' или 'закупка'?");
+            if (interpret.includes("продажа")) {
+              orderData.type = "продажа";
+            } else if (interpret.includes("закупка")) {
+              orderData.type = "закупка";
+            } else {
+              speak("Извините, не понял. Повторите, я продаю или я покупаю?", nextStep);
+              return;
+            }
+            step = 1;
+            nextStep();
+          });
+        });
+
+      } else if (step === 1) {
+        const aiPrompt = await callDeepSeek("Спроси у пользователя, какой материал?");
+        speak(aiPrompt || "Какой материал? Например, медь, алюминий, латунь.", () => {
+          listen((transcript) => {
+            log("Вы сказали: " + transcript);
+            orderData.material = transcript || "не указан";
+            step = 2;
+            nextStep();
+          });
+        });
+
+      } else if (step === 2) {
+        const aiPrompt = await callDeepSeek("Спроси у пользователя, какое количество?");
+        speak(aiPrompt || "Укажите количество. Например, 5 тонн, 100 килограммов и так далее.", () => {
+          listen((transcript) => {
+            log("Вы сказали: " + transcript);
+            orderData.quantity = transcript || "не указано";
+            step = 3;
+            nextStep();
+          });
+        });
+
+      } else if (step === 3) {
+        const aiPrompt = await callDeepSeek("Спроси у пользователя, из какого он города?");
+        speak(aiPrompt || "Из какого вы города? Например, Москва или Санкт-Петербург.", () => {
+          listen((transcript) => {
+            log("Вы сказали: " + transcript);
+            orderData.city = transcript || "не указан";
+            step = 4;
+            nextStep();
+          });
+        });
+
+      } else if (step === 4) {
+        const aiPrompt = await callDeepSeek("Спроси у пользователя, есть ли дополнительная информация?");
+        speak(aiPrompt || "Добавьте дополнительную информацию, или скажите ничего, если нет.", () => {
+          listen((transcript) => {
+            log("Вы сказали: " + transcript);
+            orderData.info = transcript || "не указана";
+            step = 5;
+            nextStep();
+          });
+        });
+
+      } else if (step === 5) {
+        // Confirm
+        const summary =
+          "Тип: " + orderData.type + "\n" +
+          "Материал: " + orderData.material + "\n" +
+          "Количество: " + orderData.quantity + "\n" +
+          "Город: " + orderData.city + "\n" +
+          "Доп. информация: " + orderData.info + "\n" +
+          "Скажите да для подтверждения, или нет для отмены.";
+
+        speak(summary, () => {
+          listen((transcript) => {
+            log("Вы сказали: " + transcript);
+            if (transcript.includes("да") || transcript.includes("конечно")) {
+              speak("Заявка успешно создана! Спасибо!", () => {
+                // Send data to server
+                fetch("/submit_order", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(orderData)
+                })
+                .then(res => res.text())
+                .then(txt => {
+                  log("Ответ сервера: " + txt);
+                  speak("Готово! Всего доброго.");
+                })
+                .catch(err => {
+                  log("Ошибка при отправке данных: " + err);
+                  speak("Произошла ошибка при сохранении заявки.");
+                });
+              });
+            } else {
+              speak("Заявка отменена. Всего доброго!");
+            }
+          });
+        });
+      }
+    }
+
+    document.getElementById("startBtn").addEventListener("click", () => {
+      step = 0;
+      orderData = { type: "", material: "", quantity: "", city: "", info: "" };
+      document.getElementById("log").textContent = "";
+      nextStep();
+    });
+  </script>
+</body>
+</html>
