@@ -1,12 +1,11 @@
-"""
-handlers.py
-Основная логика бота в едином потоке.
-Без аудио, с выбором (Все заявки / По фильтру),
-и "Сброс аккаунта (Logout)" в главном меню.
-"""
-
+# handlers.py
+# Основная логика бота в едином потоке.
+# Без аудио, с выбором (Все заявки / По фильтру),
+# и "Сброс аккаунта (Logout)" в главном меню.
 import logging
 import json
+import aiohttp
+import os
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -22,6 +21,7 @@ from telegram.ext import (
     filters,
     ConversationHandler
 )
+from config import BEARER_TOKEN
 
 # Import all DB-related functions from db.py
 from db import (
@@ -44,7 +44,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MAIN_MENU, REQUEST_INPUT = range(2)
+MAIN_MENU, REQUEST_INPUT, SEARCH_INPUT = range(3)
 
 # ---------------------------------------------------------------------------
 # ПОМОГАЮЩИЕ ФУНКЦИИ
@@ -113,8 +113,6 @@ def build_notification_list_keyboard(user_id, filter_type, page=1):
     keyboard = []
     for (filter_id, val, is_en) in subitems:
         icon = "✅" if is_en == 1 else "❌"
-        # Short callback data: "tn|filter_id|page"
-        # 'tn' = toggle_notif
         data = f"tn|{filter_id}|{page}"
         button_text = f"{icon} {val}"
         keyboard.append([InlineKeyboardButton(button_text, callback_data=data)])
@@ -127,10 +125,92 @@ def build_notification_list_keyboard(user_id, filter_type, page=1):
     if nav_btns:
         keyboard.append(nav_btns)
 
-    # Кнопка назад
     keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="notif_back")])
-
     return InlineKeyboardMarkup(keyboard)
+
+async def fetch_orders():
+    orders_url = "https://scraptraffic.com/team/api/telegram_bot_external/orders"
+    headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(orders_url, headers=headers) as resp:
+            data = await resp.json()
+            return data
+
+async def post_new_order(order_data: dict) -> dict:
+    # Emulate new order via GET request (since POST returns 405)
+    url = "https://scraptraffic.com/team/api/telegram_bot_external/emulate_new_order"
+    headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
+    logger.info(f"Posting new order with data: {order_data}")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=order_data) as resp:
+            try:
+                data = await resp.json()
+                logger.info(f"New order posted successfully: {data}")
+            except Exception as e:
+                text = await resp.text()
+                logger.error(f"Error decoding JSON: {e}. Response text: {text}")
+                data = {"error": "Не удалось создать заявку"}
+            return data
+
+async def build_requests_page_text(search, page, page_size=10):
+    orders = await fetch_orders()
+    transformed = []
+    for order in orders:
+        transformed.append((
+            order.get("order_id"),
+            "Новая заявка",
+            order.get("text_material", ""),
+            order.get("text_volume", ""),
+            order.get("text_city", ""),
+            order.get("comment", ""),
+            order.get("date", "")
+        ))
+    if search:
+        search_lower = search.lower()
+        filtered = [r for r in transformed if (search_lower in str(r[0]).lower() or
+                                                search_lower in str(r[1]).lower() or
+                                                search_lower in (r[2] or "").lower() or
+                                                search_lower in (r[3] or "").lower() or
+                                                search_lower in (r[4] or "").lower() or
+                                                search_lower in (r[5] or "").lower() or
+                                                search_lower in (r[6] or "").lower())]
+    else:
+        filtered = transformed
+    total = len(filtered)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_reqs = filtered[start:end]
+    text = "<b>Все заявки:</b>\n\n" + format_requests_list(page_reqs)
+    has_prev = page > 1
+    has_next = end < total
+    return text, has_prev, has_next
+
+def build_requests_page_keyboard(page, has_prev, has_next, search):
+    buttons = []
+    nav_buttons = []
+    if has_prev:
+        nav_buttons.append(InlineKeyboardButton("⬅️", callback_data=f"view_req|{page-1}|{search}"))
+    if has_next:
+        nav_buttons.append(InlineKeyboardButton("➡️", callback_data=f"view_req|{page+1}|{search}"))
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    buttons.append([InlineKeyboardButton("🔍 Поиск", callback_data="view_req_search")])
+    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="notif_back")])
+    return InlineKeyboardMarkup(buttons)
+
+def format_requests_list(requests):
+    if not requests:
+        return "Заявок пока нет."
+    lines = []
+    for r in requests:
+        (req_id, req_type, material, qty, city, info, created_at) = r
+        line = (
+            f"#{req_id}: [{req_type}] {material}, {qty}, {city}\n"
+            f"   Доп: {info}\n"
+            f"   Дата: {created_at}\n"
+        )
+        lines.append(line)
+    return "\n".join(lines)
 
 # ---------------------------------------------------------------------------
 # УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЕЙ О НОВОЙ ЗАЯВКЕ
@@ -139,7 +219,6 @@ async def notify_users_about_new_request(context: ContextTypes.DEFAULT_TYPE, cre
     material = req["material"]
     city = req["city"]
     matching_user_ids = get_users_for_notification(material, city)
-
     notification_text = (
         f"🔔 <b>Новая заявка</b>\n"
         f"Тип: {req['type']}\n"
@@ -150,7 +229,6 @@ async def notify_users_about_new_request(context: ContextTypes.DEFAULT_TYPE, cre
         "\n"
         "Для просмотра откройте меню бота."
     )
-
     for uid in matching_user_ids:
         if uid == creator_user_id:
             continue
@@ -166,28 +244,6 @@ async def notify_users_about_new_request(context: ContextTypes.DEFAULT_TYPE, cre
                 logger.error(f"Failed to send notification to user_id={uid} (tg_id={tg_id}): {e}")
 
 # ---------------------------------------------------------------------------
-# ВЫВОД ВСЕХ ЗАЯВОК (ПРОСТАЯ ВЕРСИЯ)
-# ---------------------------------------------------------------------------
-def format_requests_list(requests):
-    """
-    requests => list of rows: (id, req_type, material, quantity, city, info, created_at)
-    Return a formatted string.
-    """
-    if not requests:
-        return "Заявок пока нет."
-
-    lines = []
-    for r in requests:
-        (req_id, req_type, material, qty, city, info, created_at) = r
-        line = (
-            f"#{req_id}: [{req_type}] {material}, {qty}, {city}\n"
-            f"   Доп: {info}\n"
-            f"   Дата: {created_at}\n"
-        )
-        lines.append(line)
-    return "\n".join(lines)
-
-# ---------------------------------------------------------------------------
 # /start
 # ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -197,7 +253,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if row:
         user_id = row[0]
         init_notification_items_for_user(user_id)
-
     if update.message:
         await update.message.reply_text("⏳ Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
         await update.message.reply_text(
@@ -214,30 +269,40 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     data = query.data
     user = query.from_user
-
     user_row = get_user_by_telegram_id(user.id)
     if not user_row:
         await query.answer("Вы не зарегистрированы. Введите /start.", show_alert=True)
         return ConversationHandler.END
     user_id = user_row[0]
 
-    # Главное меню
     if data == "menu_pro":
-        await query.message.edit_text(
-            "🚀 Функция активации Pro‑аккаунта пока не реализована.",
-            reply_markup=build_main_menu(),
-            parse_mode='HTML'
-        )
+        try:
+            await query.message.edit_text(
+                "🚀 Функция активации Pro‑аккаунта пока не реализована.",
+                reply_markup=build_main_menu(),
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
 
     elif data == "menu_notifications":
-        await query.message.edit_text(
-            "🔔 Вы можете отфильтровать получение заявок по материалам и городам.\n"
-            "По умолчанию уведомления приходят по всем материалам и городам.",
-            reply_markup=build_notifications_menu(),
-            parse_mode='HTML'
-        )
+        try:
+            await query.message.edit_text(
+                "🔔 Вы можете отфильтровать получение заявок по материалам и городам.\n"
+                "По умолчанию уведомления приходят по всем материалам и городам.",
+                reply_markup=build_notifications_menu(),
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
 
@@ -252,7 +317,13 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             }
         summary = build_request_summary(context.user_data)
         kb = build_request_keyboard(context.user_data)
-        await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+        try:
+            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
 
@@ -267,7 +338,6 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return ConversationHandler.END
 
-    # Меню уведомлений
     elif data == "notif_back_main":
         await query.message.delete()
         await query.answer()
@@ -281,56 +351,114 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif data == "notif_materials":
         items_kb = build_notification_list_keyboard(user_id, "material", page=1)
-        await query.message.edit_text(
-            "🔔 Настройка материалов:",
-            reply_markup=items_kb,
-            parse_mode='HTML'
-        )
+        try:
+            await query.message.edit_text(
+                "🔔 Настройка материалов:",
+                reply_markup=items_kb,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
 
     elif data == "notif_cities":
         items_kb = build_notification_list_keyboard(user_id, "city", page=1)
-        await query.message.edit_text(
-            "🔔 Настройка городов:",
-            reply_markup=items_kb,
-            parse_mode='HTML'
-        )
+        try:
+            await query.message.edit_text(
+                "🔔 Настройка городов:",
+                reply_markup=items_kb,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
 
     elif data == "notif_view_requests":
-        # Показать все заявки (простая версия)
-        all_reqs = get_all_requests()
-        text = "<b>Все заявки:</b>\n\n" + format_requests_list(all_reqs)
-        # Возможно, в реальном коде делать пагинацию, но тут всё одним сообщением
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Назад", callback_data="notif_back")]
-        ])
-        await query.message.edit_text(text, parse_mode='HTML', reply_markup=kb)
+        text, has_prev, has_next = await build_requests_page_text("", 1)
+        kb = build_requests_page_keyboard(1, has_prev, has_next, "")
+        try:
+            await query.message.edit_text(text, parse_mode='HTML', reply_markup=kb)
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
+
+    elif data.startswith("view_req|"):
+        parts = data.split("|")
+        if len(parts) == 3:
+            try:
+                page = int(parts[1])
+            except ValueError:
+                page = 1
+            search = parts[2]
+            text, has_prev, has_next = await build_requests_page_text(search, page)
+            kb = build_requests_page_keyboard(page, has_prev, has_next, search)
+            try:
+                await query.message.edit_text(text, parse_mode='HTML', reply_markup=kb)
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.info("Message not modified, skipping update.")
+                else:
+                    logger.error(f"edit_text error: {e}")
+            await query.answer()
+            return MAIN_MENU
+        else:
+            await query.answer("Непонятный формат запроса.", show_alert=True)
+            return MAIN_MENU
+
+    elif data == "view_req_search":
+        try:
+            await query.message.edit_text(
+                "Введите текст для поиска по заявкам:",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
+        await query.answer()
+        return SEARCH_INPUT
 
     elif data == "notif_back":
-        # Вернуться к меню уведомлений
-        await query.message.edit_text(
-            "🔔 Вы можете отфильтровать получение заявок по материалам и городам.\n"
-            "По умолчанию уведомления приходят по всем материалам и городам.",
-            reply_markup=build_notifications_menu(),
-            parse_mode='HTML'
-        )
+        try:
+            await query.message.edit_text(
+                "🔔 Вы можете отфильтровать получение заявок по материалам и городам.\n"
+                "По умолчанию уведомления приходят по всем материалам и городам.",
+                reply_markup=build_notifications_menu(),
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
 
-    # ----------------------------------------------
-    # Редактирование заявки (req_...)
-    # ----------------------------------------------
     elif data.startswith("req_"):
         if data == "req_set_type_selling":
             context.user_data["request"]["type"] = "продажа"
             summary = build_request_summary(context.user_data)
             kb = build_request_keyboard(context.user_data)
-            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            try:
+                await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.info("Message not modified, skipping update.")
+                else:
+                    logger.error(f"edit_text error: {e}")
             await query.answer()
             return MAIN_MENU
 
@@ -338,22 +466,32 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["request"]["type"] = "закупка"
             summary = build_request_summary(context.user_data)
             kb = build_request_keyboard(context.user_data)
-            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            try:
+                await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.info("Message not modified, skipping update.")
+                else:
+                    logger.error(f"edit_text error: {e}")
             await query.answer()
             return MAIN_MENU
 
         elif data == "req_really_confirm":
             req = context.user_data["request"]
-            add_request(
-                user_id=user_id,
-                req_type=req["type"],
-                material=req["material"],
-                quantity=req["quantity"],
-                city=req["city"],
-                info=req["info"]
-            )
-            await notify_users_about_new_request(context, user_id, req)
+            try:
+                result = await post_new_order({
+                    "type": req["type"],
+                    "material": req["material"],
+                    "quantity": req["quantity"],
+                    "city": req["city"],
+                    "info": req["info"]
+                })
+            except Exception as e:
+                logger.error(f"Failed to post new order: {e}")
+                await query.answer("Ошибка при создании заявки.", show_alert=True)
+                return MAIN_MENU
 
+            await notify_users_about_new_request(context, user_id, req)
             context.user_data["request"] = {
                 "type": "не указан",
                 "material": "не указан",
@@ -361,7 +499,13 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "city": "не указан",
                 "info": "не указана"
             }
-            await query.message.edit_text("✅ Заявка успешно создана!", parse_mode='HTML')
+            try:
+                await query.message.edit_text("✅ Заявка успешно создана!", parse_mode='HTML')
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.info("Message not modified, skipping update.")
+                else:
+                    logger.error(f"edit_text error: {e}")
             await query.answer()
             await query.message.reply_text(
                 "📋 Главное меню: выберите действие.",
@@ -390,18 +534,30 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 ],
                 [InlineKeyboardButton("🔙 Отмена", callback_data="req_cancel_field")]
             ])
-            await query.message.edit_text("Выберите тип заявки:", reply_markup=kb, parse_mode='HTML')
+            try:
+                await query.message.edit_text("Выберите тип заявки:", reply_markup=kb, parse_mode='HTML')
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.info("Message not modified, skipping update.")
+                else:
+                    logger.error(f"edit_text error: {e}")
             await query.answer()
             return MAIN_MENU
 
         elif sub in ["material", "quantity", "city", "info"]:
             context.user_data["awaiting_field"] = sub
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data="req_cancel_field")]])
-            await query.message.edit_text(
-                f"Введите значение для <b>{sub}</b>:\nОтправьте текст сообщением в чат.",
-                reply_markup=kb,
-                parse_mode='HTML'
-            )
+            try:
+                await query.message.edit_text(
+                    f"Введите значение для <b>{sub}</b>:\nОтправьте текст сообщением в чат.",
+                    reply_markup=kb,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.info("Message not modified, skipping update.")
+                else:
+                    logger.error(f"edit_text error: {e}")
             await query.answer()
             return REQUEST_INPUT
 
@@ -419,11 +575,17 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     [InlineKeyboardButton("✅ Разместить заявку", callback_data="req_really_confirm")],
                     [InlineKeyboardButton("🔄 Вернуться к редактированию", callback_data="req_no_confirm")]
                 ])
-                await query.message.edit_text(
-                    f"{summary}\nПодтверждаете размещение заявки?",
-                    reply_markup=kb,
-                    parse_mode='HTML'
-                )
+                try:
+                    await query.message.edit_text(
+                        f"{summary}\nПодтверждаете размещение заявки?",
+                        reply_markup=kb,
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    if "Message is not modified" in str(e):
+                        logger.info("Message not modified, skipping update.")
+                    else:
+                        logger.error(f"edit_text error: {e}")
                 await query.answer()
                 return MAIN_MENU
 
@@ -434,41 +596,33 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data in ["req_cancel_field", "req_no_confirm"]:
         summary = build_request_summary(context.user_data)
         kb = build_request_keyboard(context.user_data)
-        await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+        try:
+            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.info("Message not modified, skipping update.")
+            else:
+                logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
 
-    # ----------------------------------------------
-    # Обработка короткого callback_data для фильтров
-    # ----------------------------------------------
     elif data.startswith("tn|"):
-        # "tn|<filter_id>|<page>"
         parts = data.split("|")
         if len(parts) == 3:
             _, filter_id_str, page_str = parts
             filter_id = int(filter_id_str)
             page = int(page_str)
-
-            # Toggle
             toggle_notification_item_by_id(user_id, filter_id)
-            # Rebuild keyboard
-            # But we need to know if it's "material" or "city".
-            # We'll do a small trick: we can look it up again from DB.
-            # Because we need the filter_type to rebuild properly.
-            # Or we can store it in the callback. Let's do the second approach:
-            # We'll handle that below. For now let's do a quick solution:
-            # We'll do "ln|material|1" approach to re-page. So let's skip it:
-            # We don't know if it's material or city from just the ID. We'll do the same approach as "ln|".
-            # We'll do a separate table lookup approach. Let's do that:
-
-            # We can do a separate function to get filter_type from filter_id
             filter_type = get_filter_type_for_id(user_id, filter_id=filter_id)
             if filter_type:
                 new_kb = build_notification_list_keyboard(user_id, filter_type, page)
                 try:
                     await query.message.edit_reply_markup(new_kb)
                 except Exception as e:
-                    logger.error(f"edit_reply_markup error: {e}")
+                    if "Message is not modified" in str(e):
+                        logger.info("Message not modified, skipping update.")
+                    else:
+                        logger.error(f"edit_reply_markup error: {e}")
                 await query.answer()
                 return MAIN_MENU
             else:
@@ -479,7 +633,6 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return MAIN_MENU
 
     elif data.startswith("ln|"):
-        # "ln|<filter_type>|<page>"
         parts = data.split("|")
         if len(parts) == 3:
             _, filter_type, page_str = parts
@@ -488,7 +641,10 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             try:
                 await query.message.edit_reply_markup(new_kb)
             except Exception as e:
-                logger.error(f"edit_reply_markup error: {e}")
+                if "Message is not modified" in str(e):
+                    logger.info("Message not modified, skipping update.")
+                else:
+                    logger.error(f"edit_reply_markup error: {e}")
             await query.answer()
             return MAIN_MENU
         else:
@@ -503,9 +659,6 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ДОП. ФУНКЦИЯ: ПОЛУЧИТЬ filter_type ПО filter_id
 # ---------------------------------------------------------------------------
 def get_filter_type_for_id(user_id: int, filter_id: int) -> str:
-    """
-    Возвращает 'material' или 'city' для заданного filter_id (принадлежащего user_id).
-    """
     from db import get_connection
     conn = get_connection()
     cursor = conn.cursor()
@@ -546,7 +699,6 @@ async def request_field_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not field:
         await update.message.reply_text("⚠️ Нет поля для ввода. Попробуйте ещё раз.", parse_mode='HTML')
         return MAIN_MENU
-
     req = context.user_data.setdefault("request", {})
     if field == "material":
         req["material"] = text
@@ -556,12 +708,20 @@ async def request_field_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         req["city"] = text
     elif field == "info":
         req["info"] = text
-
     context.user_data["awaiting_field"] = None
-
     summary = build_request_summary(context.user_data)
     kb = build_request_keyboard(context.user_data)
     await update.message.reply_text(summary, reply_markup=kb, parse_mode='HTML')
+    return MAIN_MENU
+
+# ---------------------------------------------------------------------------
+# ОБРАБОТКА ВВОДА ТЕКСТА ДЛЯ ПОИСКА ЗАЯВОК
+# ---------------------------------------------------------------------------
+async def search_requests_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    search_query = update.message.text.strip()
+    text, has_prev, has_next = await build_requests_page_text(search_query, 1)
+    kb = build_requests_page_keyboard(1, has_prev, has_next, search_query)
+    await update.message.reply_text(text, reply_markup=kb, parse_mode='HTML')
     return MAIN_MENU
 
 # ---------------------------------------------------------------------------
@@ -584,6 +744,9 @@ main_flow_handler = ConversationHandler(
             CallbackQueryHandler(main_menu_callback),
             MessageHandler(filters.TEXT & ~filters.COMMAND, request_field_input),
         ],
+        SEARCH_INPUT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, search_requests_input)
+        ]
     },
     fallbacks=[CommandHandler('cancel', cmd_start)],
     name="main_flow"
@@ -597,10 +760,8 @@ from telegram.ext import Application
 async def run_bot():
     init_db()
     app = Application.builder().token("YOUR_BOT_TOKEN_HERE").build()
-
     app.add_handler(main_flow_handler)
     app.add_error_handler(error_handler)
-
     await app.run_polling()
 
 if __name__ == "__main__":
