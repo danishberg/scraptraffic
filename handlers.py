@@ -100,14 +100,12 @@ async def fetch_materials_and_cities():
     }
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
-            # Log and check the Content-Type header
             content_type = resp.headers.get("Content-Type", "")
             logger.info(f"Content-Type from server: {content_type}")
             if "application/json" not in content_type:
                 text_html = await resp.text()
                 logger.error(f"Expected JSON but got {content_type}: {text_html}")
-                return {"materials": [], "cities": []}  # Return fallback data
-
+                return {"materials": [], "cities": []}
             try:
                 raw_data = await resp.json()
             except Exception as e:
@@ -115,14 +113,23 @@ async def fetch_materials_and_cities():
                 logger.error(f"Error decoding JSON: {e}. Response text: {text_html}")
                 return {"materials": [], "cities": []}
             
-            logger.info("Raw materials_and_cities data: %s", raw_data)
-            materials_list = [m["title"] for m in raw_data.get("materials", [])
+            # Log what keys are available
+            logger.info("Raw JSON keys: %s", list(raw_data.keys()))
+            # If the keys 'materials' and 'cities' are not top-level, assume they are under 'data'
+            if "materials" not in raw_data or "cities" not in raw_data:
+                data = raw_data.get("data", {})
+            else:
+                data = raw_data
+
+            logger.info("Using data: %s", data)
+            materials_list = [m["title"] for m in data.get("materials", [])
                               if isinstance(m, dict) and "title" in m]
-            cities_list = [c["title"] for c in raw_data.get("cities", [])
+            cities_list = [c["title"] for c in data.get("cities", [])
                            if isinstance(c, dict) and "title" in c]
             result = {"materials": materials_list, "cities": cities_list}
             logger.info("Transformed materials_and_cities: %s", result)
             return result
+
 
 
 
@@ -183,17 +190,24 @@ async def fetch_orders():
             if "application/json" not in content_type:
                 text_html = await resp.text()
                 logger.error(f"Expected JSON but got {content_type}: {text_html}")
-                return []  # Return empty list if not JSON
-
+                return []
             try:
-                data = await resp.json()
+                raw_data = await resp.json()
             except Exception as e:
                 text_html = await resp.text()
                 logger.error(f"Error decoding JSON from orders: {e}. Response text: {text_html}")
                 return []
             
-            logger.info("fetch_orders received %s items", len(data))
-            return data if isinstance(data, list) else []
+            # Log top-level keys
+            logger.info("Raw orders JSON keys: %s", list(raw_data.keys()))
+            # If the data isn't a list at the top level, assume it's wrapped inside "data"
+            if not isinstance(raw_data, list):
+                orders = raw_data.get("data", [])
+            else:
+                orders = raw_data
+            logger.info("fetch_orders received %s items", len(orders))
+            return orders if isinstance(orders, list) else []
+
 
 
 
