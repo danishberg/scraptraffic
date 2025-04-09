@@ -425,15 +425,25 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.error(f"Error building material filter keyboard: {e}")
             await query.answer("Ошибка получения данных материалов", show_alert=True)
             return MAIN_MENU
+        # Append an invisible character to force a change if needed
+        new_text = "🔔 Настройка материалов: \u200b"
         try:
-            # (Append an extra character to force change if necessary)
-            await query.message.edit_text("🔔 Настройка материалов: ", reply_markup=items_kb, parse_mode='HTML')
+            await query.message.edit_text(new_text, reply_markup=items_kb, parse_mode='HTML')
         except Exception as e:
-            logger.error(f"edit_text error (materials): {e}")
-            await query.answer("Ошибка обновления сообщения", show_alert=True)
-        else:
-            await query.answer()
+            if "message is not modified" in str(e).lower():
+                logger.info("Message not modified; sending new message for notif_materials")
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=new_text,
+                    reply_markup=items_kb,
+                    parse_mode='HTML'
+                )
+            else:
+                logger.error(f"edit_text error (materials): {e}")
+                await query.answer("Ошибка обновления сообщения", show_alert=True)
+        await query.answer()
         return MAIN_MENU
+
 
 
     elif data == "notif_cities":
@@ -443,14 +453,24 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.error(f"Error building city filter keyboard: {e}")
             await query.answer("Ошибка получения данных городов", show_alert=True)
             return MAIN_MENU
+        new_text = "🔔 Настройка городов: \u200b"
         try:
-            await query.message.edit_text("🔔 Настройка городов: ", reply_markup=items_kb, parse_mode='HTML')
+            await query.message.edit_text(new_text, reply_markup=items_kb, parse_mode='HTML')
         except Exception as e:
-            logger.error(f"edit_text error (cities): {e}")
-            await query.answer("Ошибка обновления сообщения", show_alert=True)
-        else:
-            await query.answer()
+            if "message is not modified" in str(e).lower():
+                logger.info("Message not modified; sending new message for notif_cities")
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=new_text,
+                    reply_markup=items_kb,
+                    parse_mode='HTML'
+                )
+            else:
+                logger.error(f"edit_text error (cities): {e}")
+                await query.answer("Ошибка обновления сообщения", show_alert=True)
+        await query.answer()
         return MAIN_MENU
+
 
 
     elif data == "notif_view_requests":
@@ -461,14 +481,25 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.error(f"Error building requests page: {e}")
             await query.answer("Ошибка получения заявок", show_alert=True)
             return MAIN_MENU
+        # Append an invisible character to force a change if necessary
+        new_text = text + "\u200b"
         try:
-            await query.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+            await query.message.edit_text(new_text, reply_markup=kb, parse_mode='HTML')
         except Exception as e:
-            logger.error(f"edit_text error (view_requests): {e}")
-            await query.answer("Ошибка обновления сообщения", show_alert=True)
-        else:
-            await query.answer()
+            if "message is not modified" in str(e).lower():
+                logger.info("Message not modified; sending new message for notif_view_requests")
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=new_text,
+                    reply_markup=kb,
+                    parse_mode='HTML'
+                )
+            else:
+                logger.error(f"edit_text error (view_requests): {e}")
+                await query.answer("Ошибка обновления сообщения", show_alert=True)
+        await query.answer()
         return MAIN_MENU
+
 
 
     elif data.startswith("view_req|"):
