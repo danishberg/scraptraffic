@@ -95,37 +95,35 @@ async def fetch_materials_and_cities():
     logger.info("fetch_materials_and_cities called")
     url = "https://scraptraffic.com/team/api/telegram_bot_external/materials_and_cities"
     headers = {
-    "Authorization": f"Bearer {BEARER_TOKEN}",
-    "Accept": "application/json"}
-
+        "Authorization": f"Bearer {BEARER_TOKEN}",
+        "Accept": "application/json"
+    }
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
+            # Log and check the Content-Type header
+            content_type = resp.headers.get("Content-Type", "")
+            logger.info(f"Content-Type from server: {content_type}")
+            if "application/json" not in content_type:
+                text_html = await resp.text()
+                logger.error(f"Expected JSON but got {content_type}: {text_html}")
+                return {"materials": [], "cities": []}  # Return fallback data
+
             try:
-                # 1) Ensure response is the JSON type you expect:
-                if resp.content_type != "application/json":
-                    text_html = await resp.text()
-                    logger.error(f"Expected JSON but got {resp.content_type}: {text_html}")
-                    return {"materials": [], "cities": []}  # Return fallback
-                
-                # 2) Attempt to parse JSON
                 raw_data = await resp.json()
             except Exception as e:
-                # If JSON parsing failed, log the HTML or error text
                 text_html = await resp.text()
                 logger.error(f"Error decoding JSON: {e}. Response text: {text_html}")
                 return {"materials": [], "cities": []}
-
-            logger.info("Raw materials_and_cities data: %s", raw_data)
             
-            # Safely extract materials and cities
+            logger.info("Raw materials_and_cities data: %s", raw_data)
             materials_list = [m["title"] for m in raw_data.get("materials", [])
                               if isinstance(m, dict) and "title" in m]
             cities_list = [c["title"] for c in raw_data.get("cities", [])
                            if isinstance(c, dict) and "title" in c]
-
             result = {"materials": materials_list, "cities": cities_list}
             logger.info("Transformed materials_and_cities: %s", result)
             return result
+
 
 
 def add_notification_item(user_id: int, filter_type: str, value: str):
@@ -175,27 +173,28 @@ async def fetch_orders():
     logger.info("fetch_orders called")
     orders_url = "https://scraptraffic.com/team/api/telegram_bot_external/orders"
     headers = {
-    "Authorization": f"Bearer {BEARER_TOKEN}",
-    "Accept": "application/json"}
-
+        "Authorization": f"Bearer {BEARER_TOKEN}",
+        "Accept": "application/json"
+    }
     async with aiohttp.ClientSession() as session:
         async with session.get(orders_url, headers=headers) as resp:
-            try:
-                # 1) Check content_type
-                if resp.content_type != "application/json":
-                    text_html = await resp.text()
-                    logger.error(f"Expected JSON but got {resp.content_type}: {text_html}")
-                    return []  # Return empty if it's not JSON
+            content_type = resp.headers.get("Content-Type", "")
+            logger.info(f"Content-Type from orders endpoint: {content_type}")
+            if "application/json" not in content_type:
+                text_html = await resp.text()
+                logger.error(f"Expected JSON but got {content_type}: {text_html}")
+                return []  # Return empty list if not JSON
 
-                # 2) Parse JSON safely
+            try:
                 data = await resp.json()
             except Exception as e:
                 text_html = await resp.text()
-                logger.error(f"Error decoding JSON from {orders_url}: {e}. Response text: {text_html}")
+                logger.error(f"Error decoding JSON from orders: {e}. Response text: {text_html}")
                 return []
-
+            
             logger.info("fetch_orders received %s items", len(data))
             return data if isinstance(data, list) else []
+
 
 
 async def post_new_order(order_data: dict) -> dict:
