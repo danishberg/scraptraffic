@@ -35,6 +35,7 @@ jobs:
             sudo systemctl restart ${{ vars.FOLDER_AND_SERVICE_NAME }}.service
 
 
+
             { git pull 2>&1 > /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-success.txt || echo "Git pull failed" > /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt; }
 
             if [ -s /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt ]; then
