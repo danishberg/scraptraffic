@@ -94,44 +94,18 @@ def build_notifications_menu():
 async def fetch_materials_and_cities():
     logger.info("fetch_materials_and_cities called")
     url = "https://scraptraffic.com/api/telegram_bot_external/materials_and_cities"
-    headers = {
-        "Authorization": f"Bearer {BEARER_TOKEN}",
-        "Accept": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            logger.info(f"Content-Type from server: {content_type}")
-            if "application/json" not in content_type:
-                text_html = await resp.text()
-                logger.error(f"Expected JSON but got {content_type}: {text_html}")
-                return {"materials": [], "cities": []}
-            try:
-                raw_data = await resp.json()
-            except Exception as e:
-                text_html = await resp.text()
-                logger.error(f"Error decoding JSON: {e}. Response text: {text_html}")
-                return {"materials": [], "cities": []}
-            
-            # Log what keys are available
-            logger.info("Raw JSON keys: %s", list(raw_data.keys()))
-            # If the keys 'materials' and 'cities' are not top-level, assume they are under 'data'
-            if "materials" not in raw_data or "cities" not in raw_data:
-                data = raw_data.get("data", {})
-            else:
-                data = raw_data
-
-            logger.info("Using data: %s", data)
-            materials_list = [m["title"] for m in data.get("materials", [])
+            raw_data = await resp.json()
+            logger.info("Raw materials_and_cities data: %s", raw_data)
+            materials_list = [m["title"] for m in raw_data.get("materials", [])
                               if isinstance(m, dict) and "title" in m]
-            cities_list = [c["title"] for c in data.get("cities", [])
+            cities_list = [c["title"] for c in raw_data.get("cities", [])
                            if isinstance(c, dict) and "title" in c]
             result = {"materials": materials_list, "cities": cities_list}
             logger.info("Transformed materials_and_cities: %s", result)
             return result
-
-
-
 
 def add_notification_item(user_id: int, filter_type: str, value: str):
     logger.info("add_notification_item user_id=%s filter_type=%s value=%s", user_id, filter_type, value)
@@ -179,45 +153,17 @@ async def build_filter_keyboard(user_id, filter_type, page=1):
 async def fetch_orders():
     logger.info("fetch_orders called")
     orders_url = "https://scraptraffic.com/api/telegram_bot_external/orders"
-    headers = {
-        "Authorization": f"Bearer {BEARER_TOKEN}",
-        "Accept": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(orders_url, headers=headers) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            logger.info(f"Content-Type from orders endpoint: {content_type}")
-            if "application/json" not in content_type:
-                text_html = await resp.text()
-                logger.error(f"Expected JSON but got {content_type}: {text_html}")
-                return []
-            try:
-                raw_data = await resp.json()
-            except Exception as e:
-                text_html = await resp.text()
-                logger.error(f"Error decoding JSON from orders: {e}. Response text: {text_html}")
-                return []
-            
-            # Log top-level keys
-            logger.info("Raw orders JSON keys: %s", list(raw_data.keys()))
-            # If the data isn't a list at the top level, assume it's wrapped inside "data"
-            if not isinstance(raw_data, list):
-                orders = raw_data.get("data", [])
-            else:
-                orders = raw_data
-            logger.info("fetch_orders received %s items", len(orders))
-            return orders if isinstance(orders, list) else []
-
-
-
+            data = await resp.json()
+            logger.info("fetch_orders received %s items", len(data))
+            return data
 
 async def post_new_order(order_data: dict) -> dict:
     logger.info("post_new_order called with: %s", order_data)
     url = "https://scraptraffic.com/api/telegram_bot_external/emulate_new_order"
-    headers = {
-    "Authorization": f"Bearer {BEARER_TOKEN}",
-    "Accept": "application/json"}
-    
+    headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=order_data) as resp:
             try:
@@ -341,19 +287,6 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user = query.from_user
     logger.info("main_menu_callback: user_id=%s data=%s", user.id, data)
     user_row = get_user_by_telegram_id(user.id)
-    if data == "req_back_main":
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message in req_back_main: {e}")
-        await query.answer()
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="📋 Главное меню: выберите действие.",
-            reply_markup=build_main_menu(),
-            parse_mode='HTML'
-        )
-        return MAIN_MENU
     if not user_row:
         await query.answer("Вы не зарегистрированы. Введите /start.", show_alert=True)
         return ConversationHandler.END
@@ -363,7 +296,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         unique_hash = generate_unique_hash()
         valid_payment_hashes[unique_hash] = True
         payment_links[unique_hash] = user.id
-        payment_link = f"https://scraptraffic.com/bot-payment-test?id={unique_hash}"
+        payment_link = f"https://scraptraffic.com/team/bot-payment-test?id={unique_hash}"
         kb = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("Оплатить", url=payment_link),
@@ -473,88 +406,40 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return MAIN_MENU
 
     elif data == "notif_materials":
+        items_kb = await build_filter_keyboard(user_id, "material", page=1)
         try:
-            items_kb = await build_filter_keyboard(user_id, "material", page=1)
+            await query.message.edit_text(
+                "🔔 Настройка материалов:",
+                reply_markup=items_kb,
+                parse_mode='HTML'
+            )
         except Exception as e:
-            logger.error(f"Error building material filter keyboard: {e}")
-            await query.answer("Ошибка получения данных материалов", show_alert=True)
-            return MAIN_MENU
-        # Append an invisible character to force a change if needed
-        new_text = "🔔 Настройка материалов: \u200b"
-        try:
-            await query.message.edit_text(new_text, reply_markup=items_kb, parse_mode='HTML')
-        except Exception as e:
-            if "message is not modified" in str(e).lower():
-                logger.info("Message not modified; sending new message for notif_materials")
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=new_text,
-                    reply_markup=items_kb,
-                    parse_mode='HTML'
-                )
-            else:
-                logger.error(f"edit_text error (materials): {e}")
-                await query.answer("Ошибка обновления сообщения", show_alert=True)
+            logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
-
-
 
     elif data == "notif_cities":
+        items_kb = await build_filter_keyboard(user_id, "city", page=1)
         try:
-            items_kb = await build_filter_keyboard(user_id, "city", page=1)
+            await query.message.edit_text(
+                "🔔 Настройка городов:",
+                reply_markup=items_kb,
+                parse_mode='HTML'
+            )
         except Exception as e:
-            logger.error(f"Error building city filter keyboard: {e}")
-            await query.answer("Ошибка получения данных городов", show_alert=True)
-            return MAIN_MENU
-        new_text = "🔔 Настройка городов: \u200b"
-        try:
-            await query.message.edit_text(new_text, reply_markup=items_kb, parse_mode='HTML')
-        except Exception as e:
-            if "message is not modified" in str(e).lower():
-                logger.info("Message not modified; sending new message for notif_cities")
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=new_text,
-                    reply_markup=items_kb,
-                    parse_mode='HTML'
-                )
-            else:
-                logger.error(f"edit_text error (cities): {e}")
-                await query.answer("Ошибка обновления сообщения", show_alert=True)
+            logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
-
-
 
     elif data == "notif_view_requests":
+        text, has_prev, has_next = await build_requests_page_text("", 1)
+        kb = build_requests_page_keyboard(1, has_prev, has_next, "")
         try:
-            text, has_prev, has_next = await build_requests_page_text("", 1)
-            kb = await build_requests_page_keyboard(1, has_prev, has_next, "")
+            await query.message.edit_text(text, parse_mode='HTML', reply_markup=kb)
         except Exception as e:
-            logger.error(f"Error building requests page: {e}")
-            await query.answer("Ошибка получения заявок", show_alert=True)
-            return MAIN_MENU
-        # Append an invisible character to force a change if necessary
-        new_text = text + "\u200b"
-        try:
-            await query.message.edit_text(new_text, reply_markup=kb, parse_mode='HTML')
-        except Exception as e:
-            if "message is not modified" in str(e).lower():
-                logger.info("Message not modified; sending new message for notif_view_requests")
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=new_text,
-                    reply_markup=kb,
-                    parse_mode='HTML'
-                )
-            else:
-                logger.error(f"edit_text error (view_requests): {e}")
-                await query.answer("Ошибка обновления сообщения", show_alert=True)
+            logger.error(f"edit_text error: {e}")
         await query.answer()
         return MAIN_MENU
-
-
 
     elif data.startswith("view_req|"):
         parts = data.split("|")
@@ -851,7 +736,6 @@ main_flow_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cmd_start)],
     name="main_flow"
 )
-
 
 from telegram.ext import Application
 async def run_bot():
