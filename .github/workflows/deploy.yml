@@ -22,8 +22,8 @@ jobs:
           script: |
             cd /home/user1/py_projects/${{ vars.FOLDER_AND_SERVICE_NAME }}
 
-            echo "=== Starting Deployment Script ===" 
-
+            echo "=== Starting Deployment Script ==="
+            
             # Pull the latest code and capture output
             echo "Running git pull..."
             git_output=$(git pull 2>&1)
@@ -36,9 +36,9 @@ jobs:
             echo "Activating virtual environment..."
             source /home/user1/py_projects/${{ vars.FOLDER_AND_SERVICE_NAME }}/venv/bin/activate
 
-            # Install dependencies and capture output
-            echo "Installing dependencies..."
-            pip_output=$(pip install -r requirements.txt 2>&1)
+            # Install dependencies using --break-system-packages so pip can install even in externally managed env.
+            echo "Installing dependencies with --break-system-packages..."
+            pip_output=$(pip install --break-system-packages -r requirements.txt 2>&1)
             echo "$pip_output" > /home/user1/pip_install.log
             curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
               -d chat_id=${{ vars.TELEGRAM_CHAT_ID }} \
@@ -60,12 +60,10 @@ jobs:
               error_message=$(cat /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt)
               max_length=4096
 
-              # Send initial error message
               curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
                 -d chat_id=${{ vars.TELEGRAM_CHAT_ID }} \
                 -d text="Deployment ${{ vars.FOLDER_AND_SERVICE_NAME }} failed with the following error: $error_message"
 
-              # Send error message in chunks
               while [ -n "$error_message" ]; do
                 chunk="${error_message:0:max_length}"
                 curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
@@ -87,7 +85,6 @@ jobs:
                 success_message="${success_message:max_length}"
               done
             fi
-
             rm -f /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-success.txt /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt
 
             echo "=== Deployment Script Finished ==="
