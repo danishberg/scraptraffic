@@ -22,30 +22,48 @@ jobs:
           script: |
             cd /home/user1/py_projects/${{ vars.FOLDER_AND_SERVICE_NAME }}
 
-            # Pull the latest code
-            git pull
+            echo "=== Starting Deployment Script ===" 
+
+            # Pull the latest code and capture output
+            echo "Running git pull..."
+            git_output=$(git pull 2>&1)
+            echo "$git_output" > /home/user1/git_pull.log
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id=${{ vars.TELEGRAM_CHAT_ID }} \
+              -d text="Git pull output: $git_output"
 
             # Activate the virtual environment (adjust the path if needed)
+            echo "Activating virtual environment..."
             source /home/user1/py_projects/${{ vars.FOLDER_AND_SERVICE_NAME }}/venv/bin/activate
 
-            # Install dependencies
-            pip install -r requirements.txt
+            # Install dependencies and capture output
+            echo "Installing dependencies..."
+            pip_output=$(pip install -r requirements.txt 2>&1)
+            echo "$pip_output" > /home/user1/pip_install.log
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id=${{ vars.TELEGRAM_CHAT_ID }} \
+              -d text="Dependencies install output: $pip_output"
 
-            # Restart the service
+            # Restart the service and capture status
+            echo "Restarting service..."
             sudo systemctl restart ${{ vars.FOLDER_AND_SERVICE_NAME }}.service
+            status_output=$(sudo systemctl status ${{ vars.FOLDER_AND_SERVICE_NAME }}.service --no-pager)
+            echo "$status_output" > /home/user1/service_status.log
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id=${{ vars.TELEGRAM_CHAT_ID }} \
+              -d text="Service status after restart: $status_output"
 
-
-
+            # Further git pull for error check with logging
             { git pull 2>&1 > /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-success.txt || echo "Git pull failed" > /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt; }
 
             if [ -s /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt ]; then
               error_message=$(cat /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt)
               max_length=4096
 
-              # Send initial message
+              # Send initial error message
               curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
                 -d chat_id=${{ vars.TELEGRAM_CHAT_ID }} \
-                -d text="Deployment ${{ vars.FOLDER_AND_SERVICE_NAME }} failed with the following error"
+                -d text="Deployment ${{ vars.FOLDER_AND_SERVICE_NAME }} failed with the following error: $error_message"
 
               # Send error message in chunks
               while [ -n "$error_message" ]; do
@@ -69,4 +87,7 @@ jobs:
                 success_message="${success_message:max_length}"
               done
             fi
+
             rm -f /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-success.txt /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt
+
+            echo "=== Deployment Script Finished ==="
