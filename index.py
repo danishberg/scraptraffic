@@ -16,6 +16,7 @@ from handlers import (
 )
 from payment_store import valid_payment_hashes, payment_links, generate_unique_hash
 
+
 nest_asyncio.apply()
 
 logging.basicConfig(
