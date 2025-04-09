@@ -22,6 +22,19 @@ jobs:
           script: |
             cd /home/user1/py_projects/${{ vars.FOLDER_AND_SERVICE_NAME }}
 
+            # Pull the latest code
+            git pull
+
+            # Activate the virtual environment (adjust the path if needed)
+            source /home/user1/py_projects/${{ vars.FOLDER_AND_SERVICE_NAME }}/venv/bin/activate
+
+            # Install dependencies
+            pip install -r requirements.txt
+
+            # Restart the service
+            sudo systemctl restart ${{ vars.FOLDER_AND_SERVICE_NAME }}.service
+
+
             { git pull 2>&1 > /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-success.txt || echo "Git pull failed" > /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt; }
 
             if [ -s /home/user1/tmp-git-pull-${{ vars.FOLDER_AND_SERVICE_NAME }}-error.txt ]; then
