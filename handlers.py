@@ -95,17 +95,36 @@ async def fetch_materials_and_cities():
     logger.info("fetch_materials_and_cities called")
     url = "https://scraptraffic.com/team/api/telegram_bot_external/materials_and_cities"
     headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
+
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
-            raw_data = await resp.json()
+            try:
+                # 1) Ensure response is the JSON type you expect:
+                if resp.content_type != "application/json":
+                    text_html = await resp.text()
+                    logger.error(f"Expected JSON but got {resp.content_type}: {text_html}")
+                    return {"materials": [], "cities": []}  # Return fallback
+                
+                # 2) Attempt to parse JSON
+                raw_data = await resp.json()
+            except Exception as e:
+                # If JSON parsing failed, log the HTML or error text
+                text_html = await resp.text()
+                logger.error(f"Error decoding JSON: {e}. Response text: {text_html}")
+                return {"materials": [], "cities": []}
+
             logger.info("Raw materials_and_cities data: %s", raw_data)
+            
+            # Safely extract materials and cities
             materials_list = [m["title"] for m in raw_data.get("materials", [])
                               if isinstance(m, dict) and "title" in m]
             cities_list = [c["title"] for c in raw_data.get("cities", [])
                            if isinstance(c, dict) and "title" in c]
+
             result = {"materials": materials_list, "cities": cities_list}
             logger.info("Transformed materials_and_cities: %s", result)
             return result
+
 
 def add_notification_item(user_id: int, filter_type: str, value: str):
     logger.info("add_notification_item user_id=%s filter_type=%s value=%s", user_id, filter_type, value)
@@ -154,11 +173,26 @@ async def fetch_orders():
     logger.info("fetch_orders called")
     orders_url = "https://scraptraffic.com/team/api/telegram_bot_external/orders"
     headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
+
     async with aiohttp.ClientSession() as session:
         async with session.get(orders_url, headers=headers) as resp:
-            data = await resp.json()
+            try:
+                # 1) Check content_type
+                if resp.content_type != "application/json":
+                    text_html = await resp.text()
+                    logger.error(f"Expected JSON but got {resp.content_type}: {text_html}")
+                    return []  # Return empty if it's not JSON
+
+                # 2) Parse JSON safely
+                data = await resp.json()
+            except Exception as e:
+                text_html = await resp.text()
+                logger.error(f"Error decoding JSON from {orders_url}: {e}. Response text: {text_html}")
+                return []
+
             logger.info("fetch_orders received %s items", len(data))
-            return data
+            return data if isinstance(data, list) else []
+
 
 async def post_new_order(order_data: dict) -> dict:
     logger.info("post_new_order called with: %s", order_data)
