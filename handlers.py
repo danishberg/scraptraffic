@@ -284,6 +284,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     data = query.data
+
+    # Immediately handle the "req_back_main" callback data.
+    if data == "req_back_main":
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.error(f"Error deleting message in req_back_main: {e}")
+        await query.answer()  # answer the callback query
+        # Send the main menu message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="📋 Главное меню: выберите действие.",
+            reply_markup=build_main_menu(),
+            parse_mode='HTML'
+        )
+        return MAIN_MENU
+
+
     user = query.from_user
     logger.info("main_menu_callback: user_id=%s data=%s", user.id, data)
     user_row = get_user_by_telegram_id(user.id)
