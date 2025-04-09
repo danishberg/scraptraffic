@@ -419,40 +419,57 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return MAIN_MENU
 
     elif data == "notif_materials":
-        items_kb = await build_filter_keyboard(user_id, "material", page=1)
         try:
-            await query.message.edit_text(
-                "🔔 Настройка материалов:",
-                reply_markup=items_kb,
-                parse_mode='HTML'
-            )
+            items_kb = await build_filter_keyboard(user_id, "material", page=1)
         except Exception as e:
-            logger.error(f"edit_text error: {e}")
-        await query.answer()
+            logger.error(f"Error building material filter keyboard: {e}")
+            await query.answer("Ошибка получения данных материалов", show_alert=True)
+            return MAIN_MENU
+        try:
+            # (Append an extra character to force change if necessary)
+            await query.message.edit_text("🔔 Настройка материалов: ", reply_markup=items_kb, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"edit_text error (materials): {e}")
+            await query.answer("Ошибка обновления сообщения", show_alert=True)
+        else:
+            await query.answer()
         return MAIN_MENU
+
 
     elif data == "notif_cities":
-        items_kb = await build_filter_keyboard(user_id, "city", page=1)
         try:
-            await query.message.edit_text(
-                "🔔 Настройка городов:",
-                reply_markup=items_kb,
-                parse_mode='HTML'
-            )
+            items_kb = await build_filter_keyboard(user_id, "city", page=1)
         except Exception as e:
-            logger.error(f"edit_text error: {e}")
-        await query.answer()
+            logger.error(f"Error building city filter keyboard: {e}")
+            await query.answer("Ошибка получения данных городов", show_alert=True)
+            return MAIN_MENU
+        try:
+            await query.message.edit_text("🔔 Настройка городов: ", reply_markup=items_kb, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"edit_text error (cities): {e}")
+            await query.answer("Ошибка обновления сообщения", show_alert=True)
+        else:
+            await query.answer()
         return MAIN_MENU
 
+
     elif data == "notif_view_requests":
-        text, has_prev, has_next = await build_requests_page_text("", 1)
-        kb = build_requests_page_keyboard(1, has_prev, has_next, "")
         try:
-            await query.message.edit_text(text, parse_mode='HTML', reply_markup=kb)
+            text, has_prev, has_next = await build_requests_page_text("", 1)
+            kb = await build_requests_page_keyboard(1, has_prev, has_next, "")
         except Exception as e:
-            logger.error(f"edit_text error: {e}")
-        await query.answer()
+            logger.error(f"Error building requests page: {e}")
+            await query.answer("Ошибка получения заявок", show_alert=True)
+            return MAIN_MENU
+        try:
+            await query.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"edit_text error (view_requests): {e}")
+            await query.answer("Ошибка обновления сообщения", show_alert=True)
+        else:
+            await query.answer()
         return MAIN_MENU
+
 
     elif data.startswith("view_req|"):
         parts = data.split("|")
