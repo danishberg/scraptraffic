@@ -173,7 +173,7 @@ async def start_webserver():
     web_app.router.add_get("/test/materials_cities", handle_test_materials_cities)
     runner = web.AppRunner(web_app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 8081)
+    site = web.TCPSite(runner, "0.0.0.0", 5000)
     logger.info("Запуск веб-сервера на порту 8080.")
     await site.start()
 
