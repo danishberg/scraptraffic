@@ -2,3 +2,5 @@ Flask
 twilio
 python-telegram-bot==20.3
 python-dotenv
+nest_asyncio
+aiohttp
