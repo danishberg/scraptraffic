@@ -93,7 +93,7 @@ def build_notifications_menu():
 
 async def fetch_materials_and_cities():
     logger.info("fetch_materials_and_cities called")
-    url = "https://scraptraffic.com/team/api/telegram_bot_external/materials_and_cities"
+    url = "https://scraptraffic.com/api/telegram_bot_external/materials_and_cities"
     headers = {
         "Authorization": f"Bearer {BEARER_TOKEN}",
         "Accept": "application/json"
@@ -171,7 +171,7 @@ async def build_filter_keyboard(user_id, filter_type, page=1):
 
 async def fetch_orders():
     logger.info("fetch_orders called")
-    orders_url = "https://scraptraffic.com/team/api/telegram_bot_external/orders"
+    orders_url = "https://scraptraffic.com/api/telegram_bot_external/orders"
     headers = {
         "Authorization": f"Bearer {BEARER_TOKEN}",
         "Accept": "application/json"
@@ -199,7 +199,7 @@ async def fetch_orders():
 
 async def post_new_order(order_data: dict) -> dict:
     logger.info("post_new_order called with: %s", order_data)
-    url = "https://scraptraffic.com/team/api/telegram_bot_external/emulate_new_order"
+    url = "https://scraptraffic.com/api/telegram_bot_external/emulate_new_order"
     headers = {
     "Authorization": f"Bearer {BEARER_TOKEN}",
     "Accept": "application/json"}
@@ -349,7 +349,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         unique_hash = generate_unique_hash()
         valid_payment_hashes[unique_hash] = True
         payment_links[unique_hash] = user.id
-        payment_link = f"https://scraptraffic.com/team/bot-payment-test?id={unique_hash}"
+        payment_link = f"https://scraptraffic.com/bot-payment-test?id={unique_hash}"
         kb = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("Оплатить", url=payment_link),
