@@ -34,11 +34,19 @@ async def start_bot():
 
     logger.info("Создание приложения Telegram...")
     app_telegram = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Delete existing webhook before starting polling
+    try:
+        await app_telegram.bot.delete_webhook()
+        logger.info("Webhook deleted, switching to polling mode.")
+    except Exception as e:
+        logger.error("Error deleting webhook: %s", e)
+    
+    # Add handlers once after webhook deletion
     app_telegram.add_handler(main_flow_handler)
     app_telegram.add_error_handler(error_handler)
-
+    
     # (Optional) Pre-populate a test payment hash for testing
-    # Remove or comment this block in production if needed.
     test_hash = "TEST123"
     valid_payment_hashes[test_hash] = True
     payment_links[test_hash] = "TEST_TELEGRAM_ID"
@@ -47,6 +55,7 @@ async def start_bot():
 
     logger.info("Запуск Telegram-бота. Нажмите Ctrl+C для остановки.")
     await app_telegram.run_polling()
+
 
 async def handle_new_order(request: web.Request):
     logger.info("handle_new_order called")
