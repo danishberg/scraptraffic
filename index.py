@@ -177,6 +177,7 @@ async def start_webserver():
     logger.info("Запуск веб-сервера на порту 5002.")
     await site.start()
 
+
 async def main():
     await asyncio.gather(start_webserver(), start_bot())
 
