@@ -168,8 +168,8 @@ async def handle_test_materials_cities(request: web.Request):
 async def start_webserver():
     web_app = web.Application()
     web_app.router.add_post("/new_order", handle_new_order)
-    web_app.router.add_get("/team/bot-payment-test", verify_payment_link)
-    web_app.router.add_post("/team/payment-notification", handle_payment_notification)
+    web_app.router.add_get("/bot-payment-test", verify_payment_link)
+    web_app.router.add_post("/payment-notification", handle_payment_notification)
     web_app.router.add_get("/test/materials_cities", handle_test_materials_cities)
     runner = web.AppRunner(web_app)
     await runner.setup()
