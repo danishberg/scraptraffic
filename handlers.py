@@ -110,7 +110,7 @@ def build_request_keyboard(user_data):
     mat_btn = "Изменить материал" if req.get("material", "не указан") != "не указан" else "Указать материал"
     qty_btn = "Изменить количество" if req.get("quantity", "не указано") != "не указано" else "Указать количество"
     city_btn = "Изменить город" if req.get("city", "не указан") != "не указан" else "Указать город"
-    info_btn = "Изменить доп. информацию" if req.get("info", "не указана") != "не указана" else "Указать доп. информацию (контакты и тд)"
+    info_btn = "Изменить доп. информацию" if req.get("info", "не указана") != "не указана" else "Указать доп. информацию (например, контакты)"
     keyboard = [
         [InlineKeyboardButton(f"🔄 {type_btn}", callback_data="req_type")],
         [InlineKeyboardButton(f"🔄 {mat_btn}", callback_data="req_material")],
