@@ -36,9 +36,10 @@ from db import (
 )
 from payment_store import generate_unique_hash, valid_payment_hashes, payment_links
 
+# only show WARNING and ERROR
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.WARNING
 )
 logger = logging.getLogger(__name__)
 
@@ -93,23 +94,23 @@ def build_notifications_menu():
     return InlineKeyboardMarkup(keyboard)
 
 async def fetch_materials_and_cities():
-    logger.info("fetch_materials_and_cities called")
+    logger.warning("fetch_materials_and_cities called")
     url = "https://scraptraffic.com/api/telegram_bot_external/materials_and_cities"
     headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
             raw_data = await resp.json()
-            logger.info("Raw materials_and_cities data: %s", raw_data)
+            logger.warning("Raw materials_and_cities data: %s", raw_data)
             materials_list = [m["title"] for m in raw_data.get("materials", [])
                               if isinstance(m, dict) and "title" in m]
             cities_list = [c["title"] for c in raw_data.get("cities", [])
                            if isinstance(c, dict) and "title" in c]
             result = {"materials": materials_list, "cities": cities_list}
-            logger.info("Transformed materials_and_cities: %s", result)
+            logger.warning("Transformed materials_and_cities: %s", result)
             return result
 
 def add_notification_item(user_id: int, filter_type: str, value: str):
-    logger.info("add_notification_item user_id=%s filter_type=%s value=%s", user_id, filter_type, value)
+    logger.warning("add_notification_item user_id=%s filter_type=%s value=%s", user_id, filter_type, value)
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -123,7 +124,7 @@ async def build_filter_keyboard(user_id, filter_type, page=1):
     data = await fetch_materials_and_cities()
     key = "materials" if filter_type == "material" else "cities"
     items = data.get(key, [])
-    logger.info("build_filter_keyboard: user_id=%s filter_type=%s items_count=%s", user_id, filter_type, len(items))
+    logger.warning("build_filter_keyboard: user_id=%s filter_type=%s items_count=%s", user_id, filter_type, len(items))
     items_per_page = 15
     start = (page - 1) * items_per_page
     end = start + items_per_page
@@ -152,24 +153,24 @@ async def build_filter_keyboard(user_id, filter_type, page=1):
     return InlineKeyboardMarkup(keyboard)
 
 async def fetch_orders():
-    logger.info("fetch_orders called")
+    logger.warning("fetch_orders called")
     orders_url = "https://scraptraffic.com/api/telegram_bot_external/orders"
     headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(orders_url, headers=headers) as resp:
             data = await resp.json()
-            logger.info("fetch_orders received %s items", len(data))
+            logger.warning("fetch_orders received %s items", len(data))
             return data
 
 async def post_new_order(order_data: dict) -> dict:
-    logger.info("post_new_order called with: %s", order_data)
+    logger.warning("post_new_order called with: %s", order_data)
     url = "https://scraptraffic.com/api/telegram_bot_external/emulate_new_order"
     headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=order_data) as resp:
             try:
                 data = await resp.json()
-                logger.info("post_new_order success: %s", data)
+                logger.warning("post_new_order success: %s", data)
             except Exception as e:
                 text = await resp.text()
                 logger.error(f"Error decoding JSON: {e}. Response text: {text}")
@@ -177,7 +178,7 @@ async def post_new_order(order_data: dict) -> dict:
             return data
 
 async def build_requests_page_text(search, page, page_size=10):
-    logger.info("build_requests_page_text called, search=%s page=%s", search, page)
+    logger.warning("build_requests_page_text called, search=%s page=%s", search, page)
     orders = await fetch_orders()
     transformed = []
     for order in orders:
@@ -192,13 +193,15 @@ async def build_requests_page_text(search, page, page_size=10):
         ))
     if search:
         search_lower = search.lower()
-        filtered = [r for r in transformed if (search_lower in str(r[0]).lower() or
-                                               search_lower in str(r[1]).lower() or
-                                               search_lower in (r[2] or "").lower() or
-                                               search_lower in (r[3] or "").lower() or
-                                               search_lower in (r[4] or "").lower() or
-                                               search_lower in (r[5] or "").lower() or
-                                               search_lower in (r[6] or "").lower())]
+        filtered = [r for r in transformed if (
+            search_lower in str(r[0]).lower() or
+            search_lower in str(r[1]).lower() or
+            search_lower in (r[2] or "").lower() or
+            search_lower in (r[3] or "").lower() or
+            search_lower in (r[4] or "").lower() or
+            search_lower in (r[5] or "").lower() or
+            search_lower in (r[6] or "").lower()
+        )]
     else:
         filtered = transformed
     total = len(filtered)
@@ -208,11 +211,12 @@ async def build_requests_page_text(search, page, page_size=10):
     text = "<b>Все заявки:</b>\n\n" + format_requests_list(page_reqs)
     has_prev = page > 1
     has_next = end < total
-    logger.info("build_requests_page_text: total=%s, page_reqs=%s", total, len(page_reqs))
+    logger.warning("build_requests_page_text: total=%s, page_reqs=%s", total, len(page_reqs))
     return text, has_prev, has_next
 
 def build_requests_page_keyboard(page, has_prev, has_next, search):
-    logger.info("build_requests_page_keyboard: page=%s has_prev=%s has_next=%s search=%s", page, has_prev, has_next, search)
+    logger.warning("build_requests_page_keyboard: page=%s has_prev=%s has_next=%s search=%s",
+                   page, has_prev, has_next, search)
     buttons = []
     nav_buttons = []
     if has_prev:
@@ -230,17 +234,16 @@ def format_requests_list(requests):
         return "Заявок пока нет."
     lines = []
     for r in requests:
-        (req_id, req_type, material, qty, city, info, created_at) = r
-        line = (
+        req_id, req_type, material, qty, city, info, created_at = r
+        lines.append(
             f"#{req_id}: [{req_type}] {material}, {qty}, {city}\n"
             f"   Доп: {info}\n"
             f"   Дата: {created_at}\n"
         )
-        lines.append(line)
     return "\n".join(lines)
 
 async def notify_users_about_new_request(context: ContextTypes.DEFAULT_TYPE, creator_user_id: int, req: dict):
-    logger.info("notify_users_about_new_request called for user_id=%s req=%s", creator_user_id, req)
+    logger.warning("notify_users_about_new_request called for user_id=%s req=%s", creator_user_id, req)
     material = req["material"]
     city = req["city"]
     matching_user_ids = get_users_for_notification(material, city)
@@ -250,8 +253,7 @@ async def notify_users_about_new_request(context: ContextTypes.DEFAULT_TYPE, cre
         f"Материал: {material}\n"
         f"Количество: {req['quantity']}\n"
         f"Город: {city}\n"
-        f"Доп. инфо: {req['info']}\n"
-        "\n"
+        f"Доп. инфо: {req['info']}\n\n"
         "Для просмотра откройте меню бота."
     )
     for uid in matching_user_ids:
@@ -260,19 +262,17 @@ async def notify_users_about_new_request(context: ContextTypes.DEFAULT_TYPE, cre
         tg_id = get_telegram_id_by_user_id(uid)
         if tg_id:
             try:
-                logger.info("Sending new request notification to tg_id=%s", tg_id)
                 await context.bot.send_message(chat_id=tg_id, text=notification_text, parse_mode='HTML')
             except Exception as e:
-                logger.error(f"Failed to send notification to user_id=%s (tg_id={tg_id}): {e}")
+                logger.error(f"Failed to send notification to user_id=%s (tg_id=%s): %s", uid, tg_id, e)
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
-    logger.info("cmd_start called by user_id=%s, username=%s", user.id, user.username)
+    logger.warning("cmd_start called by user_id=%s, username=%s", user.id, user.username)
     add_user(user.id, user.username)
     row = get_user_by_telegram_id(user.id)
     if row:
-        user_id = row[0]
-        init_notification_items_for_user(user_id)
+        init_notification_items_for_user(row[0])
     if update.message:
         await update.message.reply_text("⏳ Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
         await update.message.reply_text(
@@ -302,7 +302,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return MAIN_MENU
 
     user = query.from_user
-    logger.info("main_menu_callback: user_id=%s data=%s", user.id, data)
+    logger.warning("main_menu_callback: user_id=%s data=%s", user.id, data)
     user_row = get_user_by_telegram_id(user.id)
     if not user_row:
         await query.answer("Вы не зарегистрированы. Введите /start.", show_alert=True)
@@ -323,7 +323,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 InlineKeyboardButton("🔙 Назад в меню", callback_data="notif_back_main")
             ]
         ])
-        logger.info("User %s generated payment link with hash=%s", user.id, unique_hash)
+        logger.warning("User %s generated payment link with hash=%s", user.id, unique_hash)
         try:
             await query.message.edit_text(
                 "Для активации Pro-аккаунта:\n\n"
@@ -335,7 +335,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         except Exception as e:
             if "Message is not modified" in str(e):
-                logger.info("Message not modified, skipping update.")
+                logger.warning("Message not modified, skipping update.")
             else:
                 logger.error(f"edit_text error: {e}")
         await query.answer()
@@ -345,11 +345,9 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parts = data.split("|", 1)
         if len(parts) == 2:
             unique_hash = parts[1]
-            logger.info("Simulated payment initiated for hash=%s by user %s", unique_hash, user.id)
-            if unique_hash in valid_payment_hashes:
-                del valid_payment_hashes[unique_hash]
-            if unique_hash in payment_links:
-                del payment_links[unique_hash]
+            logger.warning("Simulated payment initiated for hash=%s by user %s", unique_hash, user.id)
+            valid_payment_hashes.pop(unique_hash, None)
+            payment_links.pop(unique_hash, None)
             try:
                 await query.message.edit_text(
                     "✅ Оплата за Pro-аккаунт получена! (симуляция)",
@@ -376,7 +374,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         except Exception as e:
             if "Message is not modified" in str(e):
-                logger.info("Message not modified, skipping update.")
+                logger.warning("Message not modified, skipping update.")
             else:
                 logger.error(f"edit_text error: {e}")
         await query.answer()
@@ -606,7 +604,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 logger.error(f"edit_text error: {e}")
             await query.answer()
-            return REQUEST.INPUT
+            return REQUEST_INPUT
 
         elif data.split("_")[1] == "confirm":
             req = context.user_data["request"]
@@ -699,7 +697,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return MAIN_MENU
 
 async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    logger.info("text_fallback_handler called with text=%s", update.message.text)
+    logger.warning("text_fallback_handler called with text=%s", update.message.text)
     text = update.message.text.strip().lower()
     if text == "test notifications":
         await update.message.reply_text(
@@ -712,7 +710,7 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return MAIN_MENU
 
 async def request_field_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    logger.info("request_field_input called with text=%s", update.message.text)
+    logger.warning("request_field_input called with text=%s", update.message.text)
     text = update.message.text.strip()
     field = context.user_data.get("awaiting_field")
     if not field:
@@ -734,7 +732,7 @@ async def request_field_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     return MAIN_MENU
 
 async def search_requests_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    logger.info("search_requests_input called with text=%s", update.message.text)
+    logger.warning("search_requests_input called with text=%s", update.message.text)
     search_query = update.message.text.strip()
     text, has_prev, has_next = await build_requests_page_text(search_query, 1)
     kb = build_requests_page_keyboard(1, has_prev, has_next, search_query)
