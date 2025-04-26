@@ -45,14 +45,36 @@ logger = logging.getLogger(__name__)
 
 MAIN_MENU, REQUEST_INPUT, SEARCH_INPUT = range(3)
 
+# --- ссылки на каналы / чаты и поддержку ---
+CHANNEL_LINKS = [
+    ("📢 Scraptraffic (основной канал)", "https://t.me/scraptraffic"),
+    ("💎 Precious Scraptraffic",         "https://t.me/precious_scraptraffic")
+]
+SUPPORT_LINK = "https://t.me/ScrapSupport"      # тех-поддержка
+
+
 def build_main_menu():
     keyboard = [
-        [InlineKeyboardButton("🚀 Активировать Pro-аккаунт", callback_data="menu_pro")],
-        [InlineKeyboardButton("🔔 Настроить уведомления", callback_data="menu_notifications")],
-        [InlineKeyboardButton("📝 Разместить заявку", callback_data="menu_create_request")],
-        [InlineKeyboardButton("🚪 Выйти из аккаунта", callback_data="menu_logout")]
+        [InlineKeyboardButton("🚀 Активировать Pro-аккаунт",   callback_data="menu_pro")],
+        [InlineKeyboardButton("🔔 Настроить уведомления",      callback_data="menu_notifications")],
+        [InlineKeyboardButton("📝 Разместить заявку",          callback_data="menu_create_request")],
+        [InlineKeyboardButton("📢 Каналы и чаты",              callback_data="menu_channels")],   # ← NEW
+        [InlineKeyboardButton("💬 Связаться с тех поддержкой", callback_data="menu_support")],    # ← NEW
+        [InlineKeyboardButton("🚪 Выйти из аккаунта",          callback_data="menu_logout")]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+def build_channels_keyboard():
+    rows = [[InlineKeyboardButton(title, url=url)] for title, url in CHANNEL_LINKS]
+    rows.append([InlineKeyboardButton("🔙 Назад", callback_data="notif_back_main")])
+    return InlineKeyboardMarkup(rows)
+
+def build_support_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 Написать в поддержку", url=SUPPORT_LINK)],
+        [InlineKeyboardButton("🔙 Назад", callback_data="notif_back_main")]
+    ])
+
 
 def build_request_summary(user_data):
     req = user_data.get("request", {})
@@ -275,8 +297,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         init_notification_items_for_user(row[0])
     if update.message:
         await update.message.reply_text("⏳ Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
-        await update.message.reply_text(
-            "📋 Главное меню: выберите действие.",
+
+        greeting = (
+            "🤖 <b>Что может этот бот?</b>\n\n"
+            "Бот использует ИИ-платформу OpenAI и в реальном времени обрабатывает заявки "
+            "продавцов и покупателей из базы Scraptraffic.\n\n"
+            "▪️ <b>Покупателям</b>: настройте фильтры и получайте только нужные заявки.\n"
+            "▪️ <b>Продавцам</b>: разместите заявку — все пользователи бота увидят её.\n\n"
+            "⏱ В бесплатной версии сообщения приходят с задержкой ≈ 15 мин.\n"
+            "🚀 В Pro-аккаунте уведомления мгновенные!\n\n"
+            "Подпишитесь на каналы или откройте меню 👇"
+        )
+        # сначала показываем каналы / чаты
+        await update.message.reply_text(greeting, parse_mode='HTML',
+            reply_markup=build_channels_keyboard())
+        # затем обычное главное меню
+        await update.message.reply_text("📋 Главное меню: выберите действие.",
             reply_markup=build_main_menu(),
             parse_mode='HTML'
         )
@@ -308,6 +344,22 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("Вы не зарегистрированы. Введите /start.", show_alert=True)
         return ConversationHandler.END
     user_id = user_row[0]
+
+    # ---- новые пункты меню ----
+    if data == "menu_channels":
+        await query.message.edit_text("Наши каналы и тематические чаты:",
+                                      reply_markup=build_channels_keyboard(),
+                                      parse_mode='HTML')
+        await query.answer()
+        return MAIN_MENU
+
+    if data == "menu_support":
+        await query.message.edit_text("Свяжитесь с нашей службой поддержки:",
+                                      reply_markup=build_support_keyboard(),
+                                      parse_mode='HTML')
+        await query.answer()
+        return MAIN_MENU
+
 
     if data == "menu_pro":
         unique_hash = generate_unique_hash()
