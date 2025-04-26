@@ -107,20 +107,27 @@ def build_request_summary(user_data):
 def build_request_keyboard(user_data):
     req = user_data.get("request", {})
     type_btn = "Изменить тип заявки" if req.get("type", "не указан") != "не указан" else "Указать тип заявки"
-    mat_btn = "Изменить материал" if req.get("material", "не указан") != "не указан" else "Указать материал"
-    qty_btn = "Изменить количество" if req.get("quantity", "не указано") != "не указано" else "Указать количество"
-    city_btn = "Изменить город" if req.get("city", "не указан") != "не указан" else "Указать город"
-    info_btn = "Изменить доп. информацию" if req.get("info", "не указана") != "не указана" else "Указать доп. информацию (например, контакты)"
+    mat_btn  = "Изменить материал"      if req.get("material", "не указан") != "не указан" else "Указать материал"
+    qty_btn  = "Изменить количество"    if req.get("quantity", "не указано") != "не указано" else "Указать количество"
+    city_btn = "Изменить город"         if req.get("city", "не указан") != "не указан" else "Указать город"
+    # вот единственная поправка:
+    info_btn = (
+        "Изменить доп. информацию"
+        if req.get("info", "не указана") != "не указана"
+        else "Указать доп. информацию\n(📞 телефон обязателен)"
+    )
+
     keyboard = [
         [InlineKeyboardButton(f"🔄 {type_btn}", callback_data="req_type")],
-        [InlineKeyboardButton(f"🔄 {mat_btn}", callback_data="req_material")],
-        [InlineKeyboardButton(f"🔄 {qty_btn}", callback_data="req_quantity")],
+        [InlineKeyboardButton(f"🔄 {mat_btn}",  callback_data="req_material")],
+        [InlineKeyboardButton(f"🔄 {qty_btn}",  callback_data="req_quantity")],
         [InlineKeyboardButton(f"🔄 {city_btn}", callback_data="req_city")],
         [InlineKeyboardButton(f"🔄 {info_btn}", callback_data="req_info")],
         [InlineKeyboardButton("✅ Подтвердить заявку", callback_data="req_confirm")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="req_back_main")]
+        [InlineKeyboardButton("🔙 Назад", callback_data="req_back_main")],
     ]
     return InlineKeyboardMarkup(keyboard)
+
 
 def build_notifications_menu():
     keyboard = [
