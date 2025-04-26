@@ -1,3 +1,4 @@
+# handlers.py
 import logging
 import json
 import aiohttp
@@ -45,7 +46,7 @@ MAIN_MENU, REQUEST_INPUT, SEARCH_INPUT = range(3)
 
 def build_main_menu():
     keyboard = [
-        [InlineKeyboardButton("🚀 Активировать Pro‑аккаунт", callback_data="menu_pro")],
+        [InlineKeyboardButton("🚀 Активировать Pro-аккаунт", callback_data="menu_pro")],
         [InlineKeyboardButton("🔔 Настроить уведомления", callback_data="menu_notifications")],
         [InlineKeyboardButton("📝 Разместить заявку", callback_data="menu_create_request")],
         [InlineKeyboardButton("🚪 Выйти из аккаунта", callback_data="menu_logout")]
@@ -85,7 +86,7 @@ def build_request_keyboard(user_data):
 def build_notifications_menu():
     keyboard = [
         [InlineKeyboardButton("Настроить материалы", callback_data="notif_materials")],
-        [InlineKeyboardButton("Настроить города", callback_data="notif_cities")],
+        [InlineKeyboardButton("Настроить города",   callback_data="notif_cities")],
         [InlineKeyboardButton("🔍 Посмотреть все заявки", callback_data="notif_view_requests")],
         [InlineKeyboardButton("🔙 Назад", callback_data="notif_back_main")]
     ]
@@ -290,9 +291,8 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             await query.message.delete()
         except Exception as e:
-            logger.error(f"Error deleting message in req_back_main: {e}")
-        await query.answer()  # answer the callback query
-        # Send the main menu message
+            logger.warning("Could not delete message: %s", e)
+        await query.answer()
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text="📋 Главное меню: выберите действие.",
@@ -300,7 +300,6 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode='HTML'
         )
         return MAIN_MENU
-
 
     user = query.from_user
     logger.info("main_menu_callback: user_id=%s data=%s", user.id, data)
@@ -327,7 +326,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.info("User %s generated payment link with hash=%s", user.id, unique_hash)
         try:
             await query.message.edit_text(
-                "Для активации Pro‑аккаунта:\n\n"
+                "Для активации Pro-аккаунта:\n\n"
                 f"1. Нажмите кнопку «Оплатить» ниже или используйте «Оплатить (симуляция)» для имитации платежа.\n"
                 f"2. Завершите оплату на открывшейся странице (если нажали «Оплатить»)\n"
                 f"3. По завершении, нажмите кнопку «Проверить оплату» или ждите уведомления.",
@@ -353,7 +352,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 del payment_links[unique_hash]
             try:
                 await query.message.edit_text(
-                    "✅ Оплата за Pro‑аккаунт получена! (симуляция)",
+                    "✅ Оплата за Pro-аккаунт получена! (симуляция)",
                     parse_mode='HTML',
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("🔙 Назад в меню", callback_data="notif_back_main")]
@@ -403,7 +402,10 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif data == "menu_logout":
         delete_user_by_telegram_id(user.id)
-        await query.message.delete()
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.warning("Could not delete message: %s", e)
         await query.answer()
         await context.bot.send_message(
             chat_id=query.message.chat_id,
@@ -413,7 +415,10 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     elif data == "notif_back_main":
-        await query.message.delete()
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.warning("Could not delete message: %s", e)
         await query.answer()
         await context.bot.send_message(
             chat_id=query.message.chat_id,
@@ -561,7 +566,10 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return MAIN_MENU
 
         elif data.split("_")[1] == "back":
-            await query.message.delete()
+            try:
+                await query.message.delete()
+            except Exception as e:
+                logger.warning("Could not delete message: %s", e)
             await query.bot.send_message(
                 chat_id=query.message.chat_id,
                 text="📋 Главное меню: выберите действие.",
@@ -598,7 +606,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 logger.error(f"edit_text error: {e}")
             await query.answer()
-            return REQUEST_INPUT
+            return REQUEST.INPUT
 
         elif data.split("_")[1] == "confirm":
             req = context.user_data["request"]
@@ -756,6 +764,7 @@ main_flow_handler = ConversationHandler(
 )
 
 from telegram.ext import Application
+
 async def run_bot():
     init_db()
     app = Application.builder().token("YOUR_BOT_TOKEN_HERE").build()

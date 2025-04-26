@@ -16,7 +16,6 @@ from handlers import (
 )
 from payment_store import valid_payment_hashes, payment_links, generate_unique_hash
 
-
 nest_asyncio.apply()
 
 logging.basicConfig(
@@ -24,6 +23,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# hide httpx “POST /getUpdates → HTTP/1.1 200 OK” spam
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("h11").setLevel(logging.WARNING)
 
 app_telegram = None
 
@@ -100,6 +104,7 @@ async def handle_new_order(request: web.Request):
 
     return web.json_response({"status": "ok"})
 
+
 async def verify_payment_link(request: web.Request):
     logger.info("verify_payment_link called, query=%s", request.query)
     logger.info("Headers: %s", request.headers)
@@ -120,6 +125,7 @@ async def verify_payment_link(request: web.Request):
     else:
         logger.warning("verify_payment_link invalid hash=%s", unique_hash)
         return web.json_response({"error": "Invalid payment link"}, status=400)
+
 
 async def handle_payment_notification(request: web.Request):
     logger.info("handle_payment_notification called")
@@ -159,11 +165,13 @@ async def handle_payment_notification(request: web.Request):
         logger.warning("Invalid payment link in handle_payment_notification: %s", unique_hash)
         return web.json_response({"error": "Invalid payment link"}, status=400)
 
+
 async def handle_test_materials_cities(request: web.Request):
     logger.info("handle_test_materials_cities called")
     data = await fetch_materials_and_cities()
     logger.info("Test endpoint fetched materials and cities: %s", data)
     return web.json_response(data)
+
 
 async def start_webserver():
     web_app = web.Application()
@@ -180,6 +188,7 @@ async def start_webserver():
 
 async def main():
     await asyncio.gather(start_webserver(), start_bot())
+
 
 if __name__ == "__main__":
     asyncio.run(main())
