@@ -47,18 +47,24 @@ MAIN_MENU, REQUEST_INPUT, SEARCH_INPUT = range(3)
 
 # --- ссылки на каналы / чаты и поддержку ---
 # --- ссылки на каналы / чаты и поддержку ---
-CHANNEL_LINKS: list[tuple[str, str]] = [
-    ("📢 Scraptraffic (основной канал)", "https://t.me/scraptraffic"),
-    ("💎 Precious Scraptraffic",         "https://t.me/precious_scraptraffic"),
+# handlers.py
 
-    # ────────── новые тематические чаты/каналы ──────────
-    ("🧲 NEM Scraptraffic",              "https://t.me/nem_scraptraffic"),
-    ("♻️ REM Scraptraffic",              "https://t.me/rem_scraptraffic"),
-    ("📦 BASE Scraptraffic",             "https://t.me/base_scraptraffic"),
-    ("⚗️ Synthetic Scraptraffic",        "https://t.me/synthetic_scraptraffic"),
-    ("🔩 Minor Scraptraffic",            "https://t.me/minor_scraptraffic"),
-    ("📰 Waste News",                    "https://t.me/wastenews"),
+# ——— Ссылки на каналы и чаты ———
+CHANNEL_LINKS = [
+    # ——— Каналы ———
+    ("📢 Металлолом и вторсырьё",    "https://t.me/scraptraffic"),
+    ("📰 Мусорные новости",          "https://t.me/wastenews"),
+
+    # ——— Чат-группы ———
+    ("💎 Драгоценные металлы",       "https://t.me/precious_scraptraffic"),
+    ("🧲 Редкоземельные металлы",    "https://t.me/nem_scraptraffic"),
+    ("⚡ Новая энергия",             "https://t.me/rem_scraptraffic"),
+    ("📦 Базовые материалы",         "https://t.me/base_scraptraffic"),
+    ("🔩 Редкие материалы",          "https://t.me/minor_scraptraffic"),
+    ("⚗️ Синтетические отходы",      "https://t.me/synthetic_scraptraffic"),
 ]
+
+
 
 SUPPORT_LINK = "https://t.me/operator_scraptraffic"      # тех-поддержка
 
@@ -592,7 +598,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # -----------------------------------------------------------------
 
         if data == "req_set_type_selling":
-            context.user_data["request"]["type"] = "продажа"
+            context.user_data["request"]["type"] = "Продажа"
             summary = build_request_summary(context.user_data)
             kb = build_request_keyboard(context.user_data)
             try:
@@ -603,7 +609,7 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return MAIN_MENU
 
         elif data == "req_set_type_buying":
-            context.user_data["request"]["type"] = "закупка"
+            context.user_data["request"]["type"] = "Закупка"
             summary = build_request_summary(context.user_data)
             kb = build_request_keyboard(context.user_data)
             try:
@@ -714,6 +720,14 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     logger.error(f"edit_text error: {e}")
                 await query.answer()
                 return MAIN_MENU
+            
+        elif data == "req_no_confirm":
+            # просто показываем обратно форму редактирования
+            summary = build_request_summary(context.user_data)
+            kb      = build_request_keyboard(context.user_data)
+            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            await query.answer()
+            return MAIN_MENU
 
         else:
             await query.answer("Непонятная команда req_.", show_alert=True)
