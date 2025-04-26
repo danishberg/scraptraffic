@@ -39,7 +39,7 @@ from payment_store import generate_unique_hash, valid_payment_hashes, payment_li
 # only show WARNING and ERROR
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.WARNING
+    level=logging.ERROR
 )
 logger = logging.getLogger(__name__)
 

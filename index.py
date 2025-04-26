@@ -20,7 +20,7 @@ nest_asyncio.apply()
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.WARNING
+    level=logging.ERROR
 )
 logger = logging.getLogger(__name__)
 
