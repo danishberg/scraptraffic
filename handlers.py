@@ -50,7 +50,7 @@ CHANNEL_LINKS = [
     ("📢 Scraptraffic (основной канал)", "https://t.me/scraptraffic"),
     ("💎 Precious Scraptraffic",         "https://t.me/precious_scraptraffic")
 ]
-SUPPORT_LINK = "https://t.me/ScrapSupport"      # тех-поддержка
+SUPPORT_LINK = "https://t.me/operator_scraptraffic"      # тех-поддержка
 
 
 def build_main_menu():
@@ -292,11 +292,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     logger.warning("cmd_start called by user_id=%s, username=%s", user.id, user.username)
     add_user(user.id, user.username)
+
+    # инициализация фильтров для нового пользователя
     row = get_user_by_telegram_id(user.id)
     if row:
         init_notification_items_for_user(row[0])
+
     if update.message:
-        await update.message.reply_text("⏳ Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
+        # ---- СТРОКА ОЖИДАНИЯ (ОПЦИОНАЛЬНО)----
+        # await update.message.reply_text("⏳ Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
 
         greeting = (
             "🤖 <b>Что может этот бот?</b>\n\n"
@@ -308,14 +312,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "🚀 В Pro-аккаунте уведомления мгновенные!\n\n"
             "Подпишитесь на каналы или откройте меню 👇"
         )
-        # сначала показываем каналы / чаты
+
+        # приветственное сообщение
         await update.message.reply_text(greeting, parse_mode='HTML')
-        # затем обычное главное меню
-        await update.message.reply_text("📋 Главное меню: выберите действие.",
+
+        # главное меню
+        await update.message.reply_text(
+            "📋 Главное меню: выберите действие.",
             reply_markup=build_main_menu(),
             parse_mode='HTML'
         )
+
     return MAIN_MENU
+
 
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -558,6 +567,20 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return MAIN_MENU
 
     elif data.startswith("req_"):
+
+        # --- 1. ОТМЕНА ввода поля ----------------------------------------
+        if data == "req_cancel_field":
+            # сбрасываем ожидаемое поле
+            context.user_data["awaiting_field"] = None
+
+            # показываем прежнюю «шапку» заявки и клавиатуру редактирования
+            summary = build_request_summary(context.user_data)
+            kb      = build_request_keyboard(context.user_data)
+            await query.message.edit_text(summary, reply_markup=kb, parse_mode='HTML')
+            await query.answer()
+            return MAIN_MENU
+        # -----------------------------------------------------------------
+
         if data == "req_set_type_selling":
             context.user_data["request"]["type"] = "продажа"
             summary = build_request_summary(context.user_data)
