@@ -309,8 +309,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "Подпишитесь на каналы или откройте меню 👇"
         )
         # сначала показываем каналы / чаты
-        await update.message.reply_text(greeting, parse_mode='HTML',
-            reply_markup=build_channels_keyboard())
+        await update.message.reply_text(greeting, parse_mode='HTML')
         # затем обычное главное меню
         await update.message.reply_text("📋 Главное меню: выберите действие.",
             reply_markup=build_main_menu(),
