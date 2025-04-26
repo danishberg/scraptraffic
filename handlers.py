@@ -46,10 +46,20 @@ logger = logging.getLogger(__name__)
 MAIN_MENU, REQUEST_INPUT, SEARCH_INPUT = range(3)
 
 # --- ссылки на каналы / чаты и поддержку ---
-CHANNEL_LINKS = [
+# --- ссылки на каналы / чаты и поддержку ---
+CHANNEL_LINKS: list[tuple[str, str]] = [
     ("📢 Scraptraffic (основной канал)", "https://t.me/scraptraffic"),
-    ("💎 Precious Scraptraffic",         "https://t.me/precious_scraptraffic")
+    ("💎 Precious Scraptraffic",         "https://t.me/precious_scraptraffic"),
+
+    # ────────── новые тематические чаты/каналы ──────────
+    ("🧲 NEM Scraptraffic",              "https://t.me/nem_scraptraffic"),
+    ("♻️ REM Scraptraffic",              "https://t.me/rem_scraptraffic"),
+    ("📦 BASE Scraptraffic",             "https://t.me/base_scraptraffic"),
+    ("⚗️ Synthetic Scraptraffic",        "https://t.me/synthetic_scraptraffic"),
+    ("🔩 Minor Scraptraffic",            "https://t.me/minor_scraptraffic"),
+    ("📰 Waste News",                    "https://t.me/wastenews"),
 ]
+
 SUPPORT_LINK = "https://t.me/operator_scraptraffic"      # тех-поддержка
 
 
